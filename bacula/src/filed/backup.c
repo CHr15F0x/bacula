@@ -54,14 +54,18 @@ static void close_vss_backup_session(JCR *jcr);
 
 //
 // AS TODO
-// lazy thread creation
-// condition variables
+// condition variables for buffers which are ready to be used
+// or buffers which can be consumed by the consumer thread
 //
 
 #define AS_DEBUG 0
-
-#define AS_THREAD_BASE_ID 100
 #define AS_BUFFER_BASE 1000
+
+#define AS_LEGACY_PRODUCERS 0
+
+#if AS_LEGACY_PRODUCERS
+#define AS_THREAD_BASE_ID 100
+#endif
 
 #if AS_DEBUG
 #define QINSERT(head, object) 	{ Pmsg4(50, ">>>> QINSERT %s %d %s %s\n", __FILE__, __LINE__, #head, #object); qinsert(head, object); }
@@ -81,6 +85,7 @@ BQUEUE *qremove_wrapper(char *file, int line, char* headstr, BQUEUE *qhead)
 //
 #define AS_PRODUCER_THREADS 4
 
+#if AS_LEGACY_PRODUCERS
 typedef struct
 {
    BQUEUE bq;
@@ -99,6 +104,10 @@ static BQUEUE as_producer_threads_queue =
    &as_producer_threads_queue,
    &as_producer_threads_queue
 };
+#endif // AS_LEGACY_PRODUCERS
+
+// TODO is one instance enough? Can bacula jobs be scheduled concurently?
+static workq_t as_work_queue = { 0 };
 
 //
 // Consumer related data structures
@@ -109,6 +118,11 @@ pthread_t as_consumer_thread = 0;
 
 bool as_consumer_thread_quit = false;
 
+static BQUEUE as_consumer_buffer_queue =
+{
+   &as_consumer_buffer_queue,
+   &as_consumer_buffer_queue
+};
 //
 // Data structures shared between producer threads and consumer thread
 //
@@ -126,12 +140,6 @@ typedef struct
 // TODO use condition variable
 pthread_mutex_t as_buffer_lock = PTHREAD_MUTEX_INITIALIZER;
 
-static BQUEUE as_consumer_buffer_queue =
-{
-   &as_consumer_buffer_queue,
-   &as_consumer_buffer_queue
-};
-
 static BQUEUE as_free_buffer_queue =
 {
    &as_free_buffer_queue,
@@ -141,7 +149,7 @@ static BQUEUE as_free_buffer_queue =
 //
 // Producer loop
 //
-
+#if AS_LEGACY_PRODUCERS
 static bool as_quit_producer_thread_loop()
 {
    bool quit = false;
@@ -150,6 +158,7 @@ static bool as_quit_producer_thread_loop()
    pthread_mutex_unlock(&as_producer_thread_lock);
    return quit;
 }
+#endif // AS_LEGACY_PRODUCERS
 
 static as_buffer_t *as_acquire_buffer()
 {
@@ -178,6 +187,7 @@ static void as_consumer_enqueue_buffer(as_buffer_t *buffer)
 	pthread_mutex_unlock(&as_buffer_lock);
 }
 
+#if AS_LEGACY_PRODUCERS
 static void *as_producer_thread_loop(void *arg)
 {
    as_thread_t *thread = (as_thread_t *)arg;
@@ -205,6 +215,57 @@ static void *as_producer_thread_loop(void *arg)
    }
 
    Pmsg1(50, ">>>> Quit thread loop: %d\n", thread->id);
+
+   return NULL;
+}
+#endif // AS_LEGACY_PRODUCERS
+
+bool as_workqueue_engine_quit()
+{
+   bool quit = false;
+
+   P(as_work_queue.mutex);
+   quit = as_work_queue.quit;
+   V(as_work_queue.mutex);
+
+   return quit;
+}
+
+void *as_workqueue_engine(void *arg)
+{
+   // TODO process an entire file until it is done
+   // TODO bail out if job cancelled
+
+   char *fname = (char *)arg;
+   Pmsg1(50, ">>>> Work queue as_engine: %s\n", fname);
+   free(fname);
+
+
+   as_buffer_t *buffer = NULL;
+
+   while (as_workqueue_engine_quit() == false)
+   {
+      buffer = as_acquire_buffer();
+
+      if (buffer == NULL)
+      {
+         // Wait for a buffer to become available
+         continue;
+      }
+
+      // read file or part of file
+      // break out of loop if done
+      // otherwise use another buffer
+      usleep(200000);
+
+      // buffer is full or file size is less than buffer length,
+      // move to sender queue
+      ASSERT(buffer);
+      as_consumer_enqueue_buffer(buffer);
+
+      // TODO simulate file is done
+      break;
+   }
 
    return NULL;
 }
@@ -265,7 +326,7 @@ static void *as_consumer_thread_loop(void *arg)
     	  continue;
       }
 
-      usleep(500);
+      usleep(100000);
       // Buffer was sent
 
       ASSERT(buffer);
@@ -307,6 +368,7 @@ static void as_init_consumer_thread()
 	Pmsg0(50, ">>>> Init consumer thread\n");
 }
 
+#if AS_LEGACY_PRODUCERS
 void as_init_producer_threads_queue()
 {
 	pthread_mutex_lock(&as_producer_thread_lock);
@@ -328,20 +390,39 @@ void as_init_producer_threads_queue()
 
 	pthread_mutex_unlock(&as_producer_thread_lock);
 }
+#endif // AS_LEGACY_PRODUCERS
+
+
+
+
+
+
+
+static void as_workqueue_init()
+{
+   workq_init(&as_work_queue, AS_PRODUCER_THREADS, as_workqueue_engine);
+}
+
+
 
 static void as_init()
 {
 	Pmsg0(50, ">>>> INIT BEGIN\n");
 	as_init_free_buffers_queue();
 	as_init_consumer_thread();
-	as_init_producer_threads_queue();
+	as_workqueue_init();
+
+#if AS_LEGACY_PRODUCERS
+	// TODO remove
+	// as_init_producer_threads_queue();
+#endif
 	Pmsg0(50, ">>>> INIT END\n");
 }
 
 //
 // Shutdown
 //
-
+#if AS_LEGACY_PRODUCERS
 static void as_request_producer_threads_quit()
 {
    Pmsg0(50, ">>>> Request producer threads quit\n");
@@ -376,6 +457,7 @@ static void as_clear_producer_threads_queue()
 
    pthread_mutex_unlock(&as_producer_thread_lock);
 }
+#endif // AS_LEGACY_PRODUCERS
 
 static void as_request_consumer_thread_quit()
 {
@@ -440,12 +522,23 @@ void as_clear_free_buffers_queue()
    ASSERT(buffer_counter == AS_BUFFERS);
 }
 
+static void as_workqueue_destroy()
+{
+   workq_destroy(&as_work_queue);
+}
+
 static void as_shutdown()
 {
-	Pmsg0(50, ">>>> SHUTDOWN BEGIN\n");
-   as_request_producer_threads_quit();
-   as_join_producer_threads();
-   as_clear_producer_threads_queue();
+   Pmsg0(50, ">>>> SHUTDOWN BEGIN\n");
+
+   as_workqueue_destroy();
+
+#if AS_LEGACY_PRODUCERS
+   // TODO remove
+   //as_request_producer_threads_quit();
+   //as_join_producer_threads();
+   //as_clear_producer_threads_queue();
+#endif
 
    as_request_consumer_thread_quit();
    as_join_consumer_thread();
@@ -459,7 +552,7 @@ static void as_shutdown()
 //
 // Other TODO
 //
-
+#if AS_LEGACY_PRODUCERS
 static void as_acquire_thread()
 {
 	as_thread_t *thread = NULL;
@@ -477,6 +570,7 @@ static void as_acquire_thread()
 
 	pthread_mutex_unlock(&as_producer_thread_lock);
 }
+#endif // AS_LEGACY_PRODUCERS
 
 
 
@@ -498,8 +592,12 @@ static void as_acquire_thread()
 bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
 {
    as_init();
-   sleep(10);
-   as_shutdown();
+
+
+
+
+
+
 
 
    BSOCK *sd;
@@ -672,6 +770,10 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
 
 
 
+
+
+
+   as_shutdown();
 
    return ok;
 }
@@ -1333,6 +1435,15 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
 #ifdef FD_NO_SEND_TEST
    return 1;
 #endif
+
+
+
+
+
+   workq_add(&as_work_queue, (void *)bstrdup(ff_pkt->fname), NULL, 0);
+
+
+
 
    msgsave = sd->msg;
    rbuf = sd->msg;                    /* read buffer */
