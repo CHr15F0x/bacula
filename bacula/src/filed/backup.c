@@ -52,6 +52,437 @@ static void crypto_session_end(JCR *jcr);
 static bool crypto_session_send(JCR *jcr, BSOCK *sd);
 static void close_vss_backup_session(JCR *jcr);
 
+//
+// AS TODO
+// lazy thread creation
+// condition variables
+//
+
+#define AS_DEBUG 0
+
+#define AS_THREAD_BASE_ID 100
+#define AS_BUFFER_BASE 1000
+
+#if AS_DEBUG
+#define QINSERT(head, object) 	{ Pmsg4(50, ">>>> QINSERT %s %d %s %s\n", __FILE__, __LINE__, #head, #object); qinsert(head, object); }
+BQUEUE *qremove_wrapper(char *file, int line, char* headstr, BQUEUE *qhead)
+{
+	Pmsg3(50, ">>>> QREMOVE %s %d %s\n", file, line, headstr);
+	return qremove(qhead);
+}
+#define QREMOVE(head) qremove_wrapper(__FILE__, __LINE__, #head, head)
+#else
+#define QINSERT qinsert
+#define QREMOVE qremove
+#endif // !AS_DEBUG
+
+//
+// Producer related data structures
+//
+#define AS_PRODUCER_THREADS 4
+
+typedef struct
+{
+   BQUEUE bq;
+   pthread_t thread;
+   int id; // For testing
+} as_thread_t;
+
+as_thread_t as_producer_threads[AS_PRODUCER_THREADS];
+
+pthread_mutex_t as_producer_thread_lock = PTHREAD_MUTEX_INITIALIZER;
+
+bool as_producer_threads_quit = false;
+
+static BQUEUE as_producer_threads_queue =
+{
+   &as_producer_threads_queue,
+   &as_producer_threads_queue
+};
+
+//
+// Consumer related data structures
+//
+pthread_mutex_t as_consumer_thread_lock = PTHREAD_MUTEX_INITIALIZER;
+
+pthread_t as_consumer_thread = 0;
+
+bool as_consumer_thread_quit = false;
+
+//
+// Data structures shared between producer threads and consumer thread
+//
+
+#define AS_BUFFERS 8
+#define AS_BUFFER_SIZE 1024*1024*5
+
+typedef struct
+{
+   BQUEUE bq;
+   char data[AS_BUFFER_SIZE];
+   int id; // For testing
+} as_buffer_t;
+
+// TODO use condition variable
+pthread_mutex_t as_buffer_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static BQUEUE as_consumer_buffer_queue =
+{
+   &as_consumer_buffer_queue,
+   &as_consumer_buffer_queue
+};
+
+static BQUEUE as_free_buffer_queue =
+{
+   &as_free_buffer_queue,
+   &as_free_buffer_queue
+};
+
+//
+// Producer loop
+//
+
+static bool as_quit_producer_thread_loop()
+{
+   bool quit = false;
+   pthread_mutex_lock(&as_producer_thread_lock);
+   quit = as_producer_threads_quit;
+   pthread_mutex_unlock(&as_producer_thread_lock);
+   return quit;
+}
+
+static as_buffer_t *as_acquire_buffer()
+{
+   as_buffer_t *buffer = NULL;
+
+   pthread_mutex_lock(&as_buffer_lock);
+   buffer = (as_buffer_t *)QREMOVE(&as_free_buffer_queue);
+   pthread_mutex_unlock(&as_buffer_lock);
+
+   if (buffer)
+   {
+	   Pmsg2(50, ">>>> Acquired: %d, free buffers: %d\n", buffer->id, qsize(&as_free_buffer_queue));
+   }
+
+   return buffer;
+}
+
+static void as_consumer_enqueue_buffer(as_buffer_t *buffer)
+{
+	pthread_mutex_lock(&as_buffer_lock);
+	Pmsg1(50, ">>>> Consumer enqueue BEGIN: %d\n", buffer->id);
+
+	QINSERT(&as_consumer_buffer_queue, &buffer->bq);
+
+	Pmsg1(50, ">>>> Consumer enqueue END: %d\n", buffer->id);
+	pthread_mutex_unlock(&as_buffer_lock);
+}
+
+static void *as_producer_thread_loop(void *arg)
+{
+   as_thread_t *thread = (as_thread_t *)arg;
+
+   Pmsg1(50, ">>>> Started thread loop: %d\n", thread->id);
+
+   as_buffer_t *buffer = NULL;
+
+   while (as_quit_producer_thread_loop() == false)
+   {
+      buffer = as_acquire_buffer();
+
+      if (buffer == NULL)
+      {
+    	  // No free buffers
+    	  continue;
+      }
+
+      sleep(1);
+      // do stuff with buffer
+
+      // buffer is full, move to sender queue
+      ASSERT(buffer);
+      as_consumer_enqueue_buffer(buffer);
+   }
+
+   Pmsg1(50, ">>>> Quit thread loop: %d\n", thread->id);
+
+   return NULL;
+}
+
+//
+// Consumer loop
+//
+
+static bool as_quit_consumer_thread_loop()
+{
+   bool quit = false;
+   pthread_mutex_lock(&as_consumer_thread_lock);
+   quit = as_consumer_thread_quit;
+   pthread_mutex_unlock(&as_consumer_thread_lock);
+   return quit;
+}
+
+static as_buffer_t *as_consumer_dequeue_buffer()
+{
+   as_buffer_t *buffer = NULL;
+
+  pthread_mutex_lock(&as_buffer_lock);
+  buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
+  pthread_mutex_unlock(&as_buffer_lock);
+
+  if (buffer)
+  {
+	   Pmsg2(50, ">>>> Consumer dequeued: %d, consumer queue size: %d\n", buffer->id, qsize(&as_consumer_buffer_queue));
+  }
+
+   return buffer;
+}
+
+static void as_release_buffer(as_buffer_t *buffer)
+{
+   pthread_mutex_lock(&as_buffer_lock);
+   Pmsg1(50, ">>>> Release buffer BEGIN: %d\n", buffer->id);
+
+   QINSERT(&as_free_buffer_queue, &buffer->bq);
+
+	Pmsg1(50, ">>>> Release buffer END: %d\n", buffer->id);
+   pthread_mutex_unlock(&as_buffer_lock);
+}
+
+static void *as_consumer_thread_loop(void *arg)
+{
+   Pmsg0(50, ">>>> Started consumer thread loop\n");
+
+   as_buffer_t *buffer = NULL;
+
+   while (as_quit_consumer_thread_loop() == false)
+   {
+      buffer = as_consumer_dequeue_buffer();
+
+      if (buffer == NULL)
+      {
+    	  // Send queue empty
+    	  continue;
+      }
+
+      usleep(500);
+      // Buffer was sent
+
+      ASSERT(buffer);
+      as_release_buffer(buffer);
+   }
+
+   Pmsg0(50, ">>>> Quit consumer thread loop\n");
+
+   return NULL;
+}
+
+//
+// Initialization
+//
+static void as_init_free_buffers_queue()
+{
+   as_buffer_t *buffer = NULL;
+
+   Pmsg1(50, ">>>> Init free buffers BEGIN: %d\n", qsize(&as_free_buffer_queue));
+
+   for (int i = 0; i < AS_BUFFERS; ++i)
+   {
+      buffer = (as_buffer_t *)malloc(AS_BUFFER_SIZE);
+      buffer->id = AS_BUFFER_BASE + i;
+      QINSERT(&as_free_buffer_queue, &buffer->bq);
+   }
+
+   Pmsg1(50, ">>>> Init free buffers END: %d\n", qsize(&as_free_buffer_queue));
+
+   ASSERT(AS_BUFFERS == qsize(&as_free_buffer_queue));
+}
+
+static void as_init_consumer_thread()
+{
+	as_consumer_thread_quit = false;
+
+	pthread_create(&as_consumer_thread, NULL, as_consumer_thread_loop, NULL);
+
+	Pmsg0(50, ">>>> Init consumer thread\n");
+}
+
+void as_init_producer_threads_queue()
+{
+	pthread_mutex_lock(&as_producer_thread_lock);
+
+   as_producer_threads_quit = false;
+
+   for (int i = 0; i < AS_PRODUCER_THREADS; ++i)
+   {
+      as_producer_threads[i].id = AS_THREAD_BASE_ID + i;
+
+      Pmsg1(50, ">>>> Starting thread: %d\n", as_producer_threads[i].id);
+
+      pthread_create(&as_producer_threads[i].thread, NULL, as_producer_thread_loop, &as_producer_threads[i]);
+
+      QINSERT(&as_producer_threads_queue, &as_producer_threads[i].bq);
+
+      Pmsg1(50, ">>>> Started thread: %d\n", as_producer_threads[i].id);
+   }
+
+	pthread_mutex_unlock(&as_producer_thread_lock);
+}
+
+static void as_init()
+{
+	Pmsg0(50, ">>>> INIT BEGIN\n");
+	as_init_free_buffers_queue();
+	as_init_consumer_thread();
+	as_init_producer_threads_queue();
+	Pmsg0(50, ">>>> INIT END\n");
+}
+
+//
+// Shutdown
+//
+
+static void as_request_producer_threads_quit()
+{
+   Pmsg0(50, ">>>> Request producer threads quit\n");
+   pthread_mutex_lock(&as_producer_thread_lock);
+   as_producer_threads_quit = true;
+   pthread_mutex_unlock(&as_producer_thread_lock);
+}
+
+static void as_join_producer_threads()
+{
+   for (int i = 0; i < AS_PRODUCER_THREADS; ++i)
+   {
+      Pmsg1(50, ">>>> Joining producer thread: %d\n", as_producer_threads[i].id);
+      pthread_join(as_producer_threads[i].thread, NULL);
+   }
+}
+
+static void as_clear_producer_threads_queue()
+{
+   as_thread_t *thread = NULL;
+
+   pthread_mutex_lock(&as_producer_thread_lock);
+
+   do
+   {
+      thread = (as_thread_t *)QREMOVE(&as_producer_threads_queue);
+      if (thread)
+      {
+         Pmsg1(50, ">>>> Removed producer thread from queue: %d\n", thread->id);
+      }
+   } while (thread != NULL);
+
+   pthread_mutex_unlock(&as_producer_thread_lock);
+}
+
+static void as_request_consumer_thread_quit()
+{
+	Pmsg0(50, ">>>> Request consumer thread quit\n");
+   pthread_mutex_lock(&as_consumer_thread_lock);
+   as_consumer_thread_quit = true;
+   pthread_mutex_unlock(&as_consumer_thread_lock);
+}
+
+static void as_join_consumer_thread()
+{
+	Pmsg0(50, ">>>> Joining consumer thread\n");
+	pthread_join(as_consumer_thread, NULL);
+}
+
+static void as_release_remaining_consumer_buffers()
+{
+	as_buffer_t *buffer = NULL;
+
+	pthread_mutex_lock(&as_buffer_lock);
+
+	Pmsg1(50, ">>>> Release remaining consumer buffers BEGIN, consumer queue size: %d\n", qsize(&as_consumer_buffer_queue));
+
+	do
+	{
+		buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
+		if (buffer != NULL)
+		{
+			Pmsg1(50, ">>>> Release remaining consumer buffer: %d\n", buffer->id);
+			QINSERT(&as_free_buffer_queue, &buffer->bq);
+		}
+	} while (buffer != NULL);
+
+	Pmsg2(50, ">>>> Release remaining consumer buffers END, consumer queue size %d, free queue size %d\n", qsize(&as_consumer_buffer_queue), qsize(&as_free_buffer_queue));
+
+	pthread_mutex_unlock(&as_buffer_lock);
+
+	ASSERT(0 == qsize(&as_consumer_buffer_queue));
+}
+
+void as_clear_free_buffers_queue()
+{
+   Pmsg1(50, ">>>> Clear free buffers queue BEGIN, size %d\n", qsize(&as_free_buffer_queue));
+   ASSERT(AS_BUFFERS == qsize(&as_free_buffer_queue));
+
+   as_buffer_t *buffer = NULL;
+   int buffer_counter = 0;
+
+   do
+   {
+      buffer = (as_buffer_t *)QREMOVE(&as_free_buffer_queue);
+      if (buffer)
+      {
+         // Smart alloc does not allow free(NULL), which is inconsistent with how free works
+         free(buffer);
+         ++buffer_counter;
+      }
+   } while (buffer != NULL);
+
+   Pmsg1(50, ">>>> Clear free buffers queue END, size %d\n", qsize(&as_free_buffer_queue));
+   ASSERT(0 == qsize(&as_free_buffer_queue));
+   ASSERT(buffer_counter == AS_BUFFERS);
+}
+
+static void as_shutdown()
+{
+	Pmsg0(50, ">>>> SHUTDOWN BEGIN\n");
+   as_request_producer_threads_quit();
+   as_join_producer_threads();
+   as_clear_producer_threads_queue();
+
+   as_request_consumer_thread_quit();
+   as_join_consumer_thread();
+   as_release_remaining_consumer_buffers();
+
+   as_clear_free_buffers_queue();
+
+   Pmsg0(50, ">>>> SHUTDOWN END\n");
+}
+
+//
+// Other TODO
+//
+
+static void as_acquire_thread()
+{
+	as_thread_t *thread = NULL;
+
+	pthread_mutex_lock(&as_producer_thread_lock);
+
+	do
+	{
+		thread = (as_thread_t *)QREMOVE(&as_producer_threads_queue);
+		if (thread)
+		{
+			Pmsg1(50, ">>>> Acquired producer thread from queue: %d\n", thread->id);
+		}
+	} while (thread == NULL);
+
+	pthread_mutex_unlock(&as_producer_thread_lock);
+}
+
+
+
+
+
+
 /**
  * Find all the requested files and send them
  * to the Storage daemon.
@@ -66,6 +497,11 @@ static void close_vss_backup_session(JCR *jcr);
  */
 bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
 {
+   as_init();
+   sleep(10);
+   as_shutdown();
+
+
    BSOCK *sd;
    bool ok = true;
    // TODO landonf: Allow user to specify encryption algorithm
@@ -232,6 +668,11 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
 
 
    Dmsg1(100, "end blast_data ok=%d\n", ok);
+
+
+
+
+
    return ok;
 }
 

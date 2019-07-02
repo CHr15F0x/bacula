@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+
+export CFLAGS="-g -O0"
+export EPREFIX=${PWD}/../install
+export PREFIX=${EPREFIX}
+export DATAROOTDIR=${EPREFIX}/dataroot
+export DOCDIR=${EPREFIX}/doc
+export WORKDIR=${EPREFIX}/bin/working
+
+./configure \
+    --prefix=${PREFIX} \
+    --exec-prefix=${EPREFIX} \
+    --with-pid-dir=${WORKDIR} \
+    --with-subsys-dir=${WORKDIR} \
+    --enable-smartalloc \
+    --with-sqlite3=/usr/include \
+    --with-working-dir=${WORKDIR} \
+    --with-data-dir=${DATAROOTDIR} \
+    --with-dump-email=klis33@gmail.com \
+    --with-job-email=klis33@gmail.com \
+    --with-smtp-host=localhost
+

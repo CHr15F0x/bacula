@@ -134,3 +134,26 @@ BQUEUE *qdchain(BQUEUE *qitem)
         return qremove(qi->qprev);
 #undef qi
 }
+
+/*  QSIZE  --  Calculate the length of a queue. */
+int qsize(BQUEUE *qhead)
+{
+#define qh ((BQUEUE *)qhead)
+
+        ASSERT(qh->qprev->qnext == qh);
+        ASSERT(qh->qnext->qprev == qh);
+
+        int size = 0;
+        BQUEUE *qi = qh->qnext;
+
+        while (qi != qh)
+        {
+           ++size;
+           qi = qi->qnext;
+        }
+
+        return size;
+
+#undef qh
+}
+
