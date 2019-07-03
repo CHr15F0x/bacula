@@ -909,12 +909,7 @@ int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level)
             Jmsg(jcr, M_NOTSAVED, 0, _("%s signature digest initialization failed\n"),
                stream_to_ascii(signing_algorithm));
             jcr->JobErrors++;
-
-
-            // AS TODO ale good_rtn moze być już w workerze, wiec musimy miec
-            // powtórzone good_rtn zanim wejdziemy do workera
-
-            goto good_rtn;
+            goto early_good_rtn;
          }
       }
 
@@ -946,17 +941,45 @@ int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level)
       case bRC_Skip:
          Dmsg2(10, "Option plugin %s decided to skip %s\n",
                ff_pkt->plugin, ff_pkt->fname);
-
-         // AS TODO ale good_rtn moze być już w workerze, wiec musimy miec
-         // powtórzone good_rtn zanim wejdziemy do workera
-
-         goto good_rtn;
+         goto early_good_rtn;
       default:
          Dmsg2(10, "Option plugin %s decided to let bacula handle %s\n",
                ff_pkt->plugin, ff_pkt->fname);
          break;
       }
    }
+
+early_good_rtn:
+   rtnstat = 1;
+
+   if (jcr->is_canceled()) {
+      Dmsg0(100, "Job canceled by user.\n");
+      rtnstat = 0;
+   }
+   if (ff_pkt->opt_plugin) {
+      // AS TODO czy to jest bezpieczne?
+      // Pewnie przydałby się muteks albo co gorsza
+      // a może raczej trzeba sprawdzić czy ktoś jeszcze używa i dopiero
+      // zerować jak wszyscy skończą
+      // Albo któreś z tych danych powinny być per wątek
+      jcr->plugin_sp = NULL;    /* sp is local to this function */
+      jcr->plugin_ctx = NULL;
+      jcr->plugin = NULL;
+      jcr->opt_plugin = false;
+   }
+   if (digest) {
+      crypto_digest_free(digest);
+   }
+   if (signing_digest) {
+      crypto_digest_free(signing_digest);
+   }
+   if (sig) {
+      crypto_sign_free(sig);
+   }
+   return rtnstat;
+
+
+
 
 
    // TODO AS tu lub wyżej sprawdzić czy plik > 5MB, jeśli tak to nie idzie do workera i
@@ -1271,19 +1294,39 @@ int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level)
 
    // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
 
+   // AS TODO zrobić funkcje save_data_continue, która w zależności czy z kontekstu wątku
+   // workera czy nie albo używa muteksów albo nie
+   // i albo wrzuca dane do bufora albo do socketa bezpośrednio (?)
+
+   // AS TODO
+   // * wysyłanie danych do socketa dla plików > 5MB
+   // musi odbywać się tak, że do kolejki buforów które są wysyłane do socketa
+   // jest wrzucany element, który tak na prawde nie jest budoforem, ale
+   // jego wysyłanie będzie się działo sekwencyjnie w miarę odczytywania pliku
+   // * rozwiązanie #2 dla dużych plików: pierwszy duży plik w kolejce otrzyma
+   // ekstra bufor tak, aby możliwe było podwójne buforowanie
+   // * rozwiązanie #3 pierwszy duży plik w kolejce otrzyma
+   // ekstra bufor tak a następnie każdy kolejny zwolniony bufor aż
+   // zostanie wysłany w całości,
 
 good_rtn:
    rtnstat = 1;
 
 bail_out:
+   // AS TODO jak job jest zatrzymany to powinniśmy wyczyścić całą work queue i
+   // uwalić wszystkie wątki
    if (jcr->is_canceled()) {
       Dmsg0(100, "Job canceled by user.\n");
       rtnstat = 0;
    }
    if (plugin_started) {
+      // AS TODO ładujemy to do bufora
       send_plugin_name(jcr, sd, false); /* signal end of plugin data */
    }
    if (ff_pkt->opt_plugin) {
+      // AS TODO tutaj jakiś mutex do jcr'a
+      // a może raczej trzeba sprawdzić czy ktoś jeszcze używa i dopiero
+      // zerować jak wszyscy skończą
       jcr->plugin_sp = NULL;    /* sp is local to this function */
       jcr->plugin_ctx = NULL;
       jcr->plugin = NULL;
