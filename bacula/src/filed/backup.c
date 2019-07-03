@@ -82,9 +82,15 @@ BQUEUE *qremove_wrapper(char *file, int line, char* headstr, BQUEUE *qhead)
 // TODO is one instance enough? Can bacula jobs be scheduled concurently?
 static workq_t as_work_queue = { 0 };
 
+// TODO AS tutaj dodać muteksy do danych które mogą być dzielone między workerami
+// 1. dla JCR
+// ... ?
+
+
 //
 // Consumer related data structures
 //
+// TODO AS ten muteks jest tylko do wychodzenia z pętli wątku
 pthread_mutex_t as_consumer_thread_lock = PTHREAD_MUTEX_INITIALIZER;
 
 pthread_t as_consumer_thread = 0;
@@ -96,6 +102,11 @@ static BQUEUE as_consumer_buffer_queue =
    &as_consumer_buffer_queue,
    &as_consumer_buffer_queue
 };
+
+typedef struct
+{
+
+} as_send_file_ctxt_t;
 //
 // Data structures shared between producer threads and consumer thread
 //
@@ -110,7 +121,8 @@ typedef struct
    int id; // For testing
 } as_buffer_t;
 
-// TODO use condition variable
+// TODO AS use condition variable
+// TODO AS dwa muteksy - jeden dla buforów wolnych, drugi dla kolejki dla konsumenta
 pthread_mutex_t as_buffer_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static BQUEUE as_free_buffer_queue =
@@ -897,6 +909,11 @@ int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level)
             Jmsg(jcr, M_NOTSAVED, 0, _("%s signature digest initialization failed\n"),
                stream_to_ascii(signing_algorithm));
             jcr->JobErrors++;
+
+
+            // AS TODO ale good_rtn moze być już w workerze, wiec musimy miec
+            // powtórzone good_rtn zanim wejdziemy do workera
+
             goto good_rtn;
          }
       }
@@ -929,6 +946,10 @@ int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level)
       case bRC_Skip:
          Dmsg2(10, "Option plugin %s decided to skip %s\n",
                ff_pkt->plugin, ff_pkt->fname);
+
+         // AS TODO ale good_rtn moze być już w workerze, wiec musimy miec
+         // powtórzone good_rtn zanim wejdziemy do workera
+
          goto good_rtn;
       default:
          Dmsg2(10, "Option plugin %s decided to let bacula handle %s\n",
@@ -937,16 +958,32 @@ int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level)
       }
    }
 
+
+   // TODO AS tu lub wyżej sprawdzić czy plik > 5MB, jeśli tak to nie idzie do workera i
+   // leci bezpośrednio do socketa (no właśnie, ale socket może być zajęty buforami z workera
+   //...
+   // jeśli <= 5MB - do workera
+
+
+
+
+   // TODO AS pierwsze miejsce gdzie wysyłane są dane do socketa
+   // od tego miejsca w dół już musimy ładować się z danymi do bufora w workerze
+
+
+
    if (do_plugin_set) {
       /* Tell bfile that it needs to call plugin */
       if (!set_cmd_plugin(&ff_pkt->bfd, jcr)) {
          goto bail_out;
       }
+      // AS TODO sprawdzić czy tu mają być jakieś mutexy
       send_plugin_name(jcr, sd, true);      /* signal start of plugin data */
       plugin_started = true;
    }
 
    /** Send attributes -- must be done after binit() */
+   // AS TODO sprawdzić czy tu mają być jakieś mutexy
    if (!encode_and_send_attributes(jcr, ff_pkt, data_stream)) {
       goto bail_out;
    }
@@ -960,6 +997,7 @@ int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level)
    }
    /** Set up the encryption context and send the session data to the SD */
    if (has_file_data && jcr->crypto.pki_encrypt) {
+      // AS TODO sprawdzić czy tu mają być jakieś mutexy
       if (!crypto_session_send(jcr, sd)) {
          goto bail_out;
       }
@@ -992,6 +1030,7 @@ int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level)
       btimer_t *tid;
 
       if (ff_pkt->type == FT_FIFO) {
+         // AS TODO sprawdzić czy można uruchomić kilka timer threadów
          tid = start_thread_timer(jcr, pthread_self(), 60);
       } else {
          tid = NULL;
@@ -999,11 +1038,17 @@ int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level)
       int noatime = ff_pkt->flags & FO_NOATIME ? O_NOATIME : 0;
       ff_pkt->bfd.reparse_point = (ff_pkt->type == FT_REPARSE ||
                                    ff_pkt->type == FT_JUNCTION);
+
+// TODO AS
+
+      // AS TODO sprawdzić czy tu mają być jakieś mutexy
       if (bopen(&ff_pkt->bfd, ff_pkt->fname, O_RDONLY | O_BINARY | noatime, 0) < 0) {
          ff_pkt->ff_errno = errno;
          berrno be;
          Jmsg(jcr, M_NOTSAVED, 0, _("     Cannot open \"%s\": ERR=%s.\n"), ff_pkt->fname,
               be.bstrerror());
+
+         // AS TODO o , tutaj muteks !
          jcr->JobErrors++;
          if (tid) {
             stop_thread_timer(tid);
@@ -1016,19 +1061,25 @@ int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level)
          tid = NULL;
       }
 
+      // AS TODO sprawdzić czy tu mają być jakieś mutexy
+      // AS TODO ta funkcja też ma pompować dane do bufora zamiast socketa
       stat = send_data(jcr, data_stream, ff_pkt, digest, signing_digest);
 
       if (ff_pkt->flags & FO_CHKCHANGES) {
          has_file_changed(jcr, ff_pkt);
       }
 
+      // AS TODO sprawdzić czy tu mają być jakieś mutexy
       bclose(&ff_pkt->bfd);
+
+// TODO AS
 
       if (!stat) {
          goto bail_out;
       }
    }
 
+   // AS TODO sprawdzić czy tu mają być jakieś mutexy
    if (have_darwin_os) {
       /** Regular files can have resource forks and Finder Info */
       if (ff_pkt->type != FT_LNKSAVED && (S_ISREG(ff_pkt->statp.st_mode) &&
@@ -1082,6 +1133,8 @@ int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level)
     * Save ACLs when requested and available for anything not being a symlink
     * and not being a plugin.
     */
+   // AS TODO sprawdzić czy tu mają być jakieś mutexy
+   // szczególnie JCR
    if (have_acl) {
       if (ff_pkt->flags & FO_ACL && ff_pkt->type != FT_LNK && !ff_pkt->cmd_plugin) {
          switch (build_acl_streams(jcr, ff_pkt)) {
@@ -1108,6 +1161,7 @@ int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level)
     * Save Extended Attributes when requested and available for all files not
     * being a plugin.
     */
+   // AS TODO sprawdzić czy tu mają być jakieś mutexy
    if (have_xattr) {
       if (ff_pkt->flags & FO_XATTR && !ff_pkt->cmd_plugin) {
          switch (build_xattr_streams(jcr, ff_pkt)) {
@@ -1190,6 +1244,8 @@ int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level)
       }
 
       /* Keep the checksum if this file is a hardlink */
+      // AS TODO sprawdzić czy tu mają być jakieś mutexy
+      // AS TODO a moze coś innego?
       if (ff_pkt->linked) {
          ff_pkt_set_link_digest(ff_pkt, digest_stream, sd->msg, size);
       }
@@ -1211,6 +1267,10 @@ int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level)
 
       sd->signal(BNET_EOD);              /* end of hardlink record */
    }
+
+
+   // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
+
 
 good_rtn:
    rtnstat = 1;
@@ -1300,6 +1360,9 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
          cbuf = (Bytef *)jcr->compress_buf;
          max_compress_len = jcr->compress_buf_size; /* set max length */
       }
+
+      // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
+      // Problem: jest jeden compress buffer a potrzeba ich wiele...
       wbuf = jcr->compress_buf;    /* compressed output here */
       cipher_input = (uint8_t *)jcr->compress_buf; /* encrypt compressed data */
 
@@ -1309,11 +1372,16 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
        * deflate.
        */
 
+      // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
+      // Problem: czy to jcr->pZLIB_compress_workset może być dzielone między wiele wątków
       if (((z_stream*)jcr->pZLIB_compress_workset)->total_in == 0) {
          /** set gzip compression level - must be done per file */
          if ((zstat=deflateParams((z_stream*)jcr->pZLIB_compress_workset,
               ff_pkt->Compress_level, Z_DEFAULT_STRATEGY)) != Z_OK) {
             Jmsg(jcr, M_FATAL, 0, _("Compression deflateParams error: %d\n"), zstat);
+            // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
+            // AS TODO wszędzie trzeba sprawdzać czy job nie został przerwany -
+            // bo wtedy cały work queue trzeba uwalić i konsumenta też
             jcr->setJobStatus(JS_ErrorTerminated);
             goto err;
          }
@@ -1368,6 +1436,10 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
        * could be returned for the given read buffer size.
        * (Using the larger of either rsize or max_compress_len)
        */
+
+      // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
+      // i znowu: współdzielony bufor dla wielu wątków
+      // pewnie trzeba tyle buforów ile wątków jest
       jcr->crypto.crypto_buf = check_pool_memory_size(jcr->crypto.crypto_buf,
            (MAX(rsize + (int)sizeof(uint32_t), (int32_t)max_compress_len) +
             cipher_block_size - 1) / cipher_block_size * cipher_block_size);
@@ -1381,6 +1453,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
     */
    if (!sd->fsend("%ld %d %lld", jcr->JobFiles, stream,
         (int64_t)ff_pkt->statp.st_size)) {
+      // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
       if (!jcr->is_job_canceled()) {
          Jmsg1(jcr, M_FATAL, 0, _("Network send error to SD. ERR=%s\n"),
                sd->bstrerror());
@@ -1442,17 +1515,20 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
          ser_uint64(ff_pkt->bfd.offset);     /* store offset in begin of buffer */
       }
 
+      // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
       jcr->ReadBytes += sd->msglen;         /* count bytes read */
 
       /** Uncompressed cipher input length */
       cipher_input_len = sd->msglen;
 
       /** Update checksum if requested */
+      // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
       if (digest) {
          crypto_digest_update(digest, (uint8_t *)rbuf, sd->msglen);
       }
 
       /** Update signing digest if requested */
+      // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
       if (signing_digest) {
          crypto_digest_update(signing_digest, (uint8_t *)rbuf, sd->msglen);
       }
@@ -1467,8 +1543,12 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
          ((z_stream*)jcr->pZLIB_compress_workset)->next_out  = (Bytef *)cbuf;
                 ((z_stream*)jcr->pZLIB_compress_workset)->avail_out = max_compress_len;
 
+         // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
+         // znowu: czy  jcr->pZLIB_compress_workset może być współdzielony przez wiele wątków
          if ((zstat=deflate((z_stream*)jcr->pZLIB_compress_workset, Z_FINISH)) != Z_STREAM_END) {
             Jmsg(jcr, M_FATAL, 0, _("Compression deflate error: %d\n"), zstat);
+            // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
+            // a może jak job jest uwalony to powinien być condition variable???
             jcr->setJobStatus(JS_ErrorTerminated);
             goto err;
          }
@@ -1497,6 +1577,10 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
 
          Dmsg3(400, "cbuf=0x%x rbuf=0x%x len=%u\n", cbuf, rbuf, sd->msglen);
 
+
+         // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
+         // Problem: czy to jcr->LZO_compress_workset może być dzielone między wiele wątków
+
          lzores = lzo1x_1_compress((const unsigned char*)rbuf, sd->msglen, cbuf2,
                                    &len, jcr->LZO_compress_workset);
          compress_len = len;
@@ -1509,6 +1593,8 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
          } else {
             /** this should NEVER happen */
             Jmsg(jcr, M_FATAL, 0, _("Compression LZO error: %d\n"), lzores);
+            // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
+            // a może jak job jest uwalony to powinien być condition variable???
             jcr->setJobStatus(JS_ErrorTerminated);
             goto err;
          }
@@ -1605,6 +1691,10 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
        * For encryption, we must call finalize to push out any
        *  buffered data.
        */
+
+      // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
+      // i znowu bufor dzielony między wiele wątków - potrzeba będzie wiele buforów
+
       if (!crypto_cipher_finalize(cipher_ctx, (uint8_t *)jcr->crypto.crypto_buf,
            &encrypted_len)) {
          /* Padding failed. Shouldn't happen. */
