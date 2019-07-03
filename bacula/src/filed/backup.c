@@ -701,6 +701,15 @@ static bool crypto_session_send(JCR *jcr, BSOCK *sd)
    return true;
 }
 
+// AS TODO
+static int as_save_file(
+   JCR *jcr,
+   FF_PKT *ff_pkt,
+   bool do_plugin_set,
+   DIGEST *digest,
+   DIGEST *signing_digest,
+   int digest_stream,
+   bool has_file_data);
 
 /**
  * Called here by find() for each file included.
@@ -714,17 +723,18 @@ static bool crypto_session_send(JCR *jcr, BSOCK *sd)
  */
 int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level)
 {
-   bool do_read = false;
-   bool plugin_started = false;
-   bool do_plugin_set = false;
-   int stat, data_stream;
-   int rtnstat = 0;
-   DIGEST *digest = NULL;
-   DIGEST *signing_digest = NULL;
-   int digest_stream = STREAM_NONE;
-   SIGNATURE *sig = NULL;
-   bool has_file_data = false;
-   struct save_pkt sp;          /* use by option plugin */
+   bool do_plugin_set = false; // AS both, passed via ctxt
+   DIGEST *digest = NULL; // AS both, passed via ctxt
+   DIGEST *signing_digest = NULL; // AS both, passed via ctxt
+   int digest_stream = STREAM_NONE; // AS both, passed via ctxt
+   bool has_file_data = false; // AS both, passed via ctxt
+
+
+
+
+
+   int rtnstat = 0; // AS duplicate, local in both
+   struct save_pkt sp;          /* use by option plugin */   // AS save_file
 
    crypto_digest_t signing_algorithm = (crypto_digest_t) me->pki_digest;
 
@@ -949,6 +959,10 @@ int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level)
       }
    }
 
+   // AS TODO what to do with the return value?
+   return as_save_file(jcr, ff_pkt, do_plugin_set, digest, signing_digest,
+      digest_stream, has_file_data);
+
 early_good_rtn:
    rtnstat = 1;
 
@@ -973,12 +987,26 @@ early_good_rtn:
    if (signing_digest) {
       crypto_digest_free(signing_digest);
    }
-   if (sig) {
-      crypto_sign_free(sig);
-   }
    return rtnstat;
+}
 
+// AS TODO
+static int as_save_file(
+   JCR *jcr,
+   FF_PKT *ff_pkt,
+   bool do_plugin_set,
+   DIGEST *digest,
+   DIGEST *signing_digest,
+   int digest_stream,
+   bool has_file_data)
+{
+   bool do_read = false; // AS async local only
+   bool plugin_started = false; // AS async local only
+   int stat, data_stream; // AS async local only
+   SIGNATURE *sig = NULL; // AS async local only
+   int rtnstat = 0; // AS duplicate, local in both
 
+   BSOCK *sd = jcr->store_bsock;
 
 
 
