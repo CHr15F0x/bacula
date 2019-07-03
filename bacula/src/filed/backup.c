@@ -61,12 +61,6 @@ static void close_vss_backup_session(JCR *jcr);
 #define AS_DEBUG 0
 #define AS_BUFFER_BASE 1000
 
-#define AS_LEGACY_PRODUCERS 0
-
-#if AS_LEGACY_PRODUCERS
-#define AS_THREAD_BASE_ID 100
-#endif
-
 #if AS_DEBUG
 #define QINSERT(head, object) 	{ Pmsg4(50, ">>>> QINSERT %s %d %s %s\n", __FILE__, __LINE__, #head, #object); qinsert(head, object); }
 BQUEUE *qremove_wrapper(char *file, int line, char* headstr, BQUEUE *qhead)
@@ -84,27 +78,6 @@ BQUEUE *qremove_wrapper(char *file, int line, char* headstr, BQUEUE *qhead)
 // Producer related data structures
 //
 #define AS_PRODUCER_THREADS 4
-
-#if AS_LEGACY_PRODUCERS
-typedef struct
-{
-   BQUEUE bq;
-   pthread_t thread;
-   int id; // For testing
-} as_thread_t;
-
-as_thread_t as_producer_threads[AS_PRODUCER_THREADS];
-
-pthread_mutex_t as_producer_thread_lock = PTHREAD_MUTEX_INITIALIZER;
-
-bool as_producer_threads_quit = false;
-
-static BQUEUE as_producer_threads_queue =
-{
-   &as_producer_threads_queue,
-   &as_producer_threads_queue
-};
-#endif // AS_LEGACY_PRODUCERS
 
 // TODO is one instance enough? Can bacula jobs be scheduled concurently?
 static workq_t as_work_queue = { 0 };
@@ -149,16 +122,6 @@ static BQUEUE as_free_buffer_queue =
 //
 // Producer loop
 //
-#if AS_LEGACY_PRODUCERS
-static bool as_quit_producer_thread_loop()
-{
-   bool quit = false;
-   pthread_mutex_lock(&as_producer_thread_lock);
-   quit = as_producer_threads_quit;
-   pthread_mutex_unlock(&as_producer_thread_lock);
-   return quit;
-}
-#endif // AS_LEGACY_PRODUCERS
 
 static as_buffer_t *as_acquire_buffer()
 {
@@ -186,39 +149,6 @@ static void as_consumer_enqueue_buffer(as_buffer_t *buffer)
 	Pmsg1(50, ">>>> Consumer enqueue END: %d\n", buffer->id);
 	pthread_mutex_unlock(&as_buffer_lock);
 }
-
-#if AS_LEGACY_PRODUCERS
-static void *as_producer_thread_loop(void *arg)
-{
-   as_thread_t *thread = (as_thread_t *)arg;
-
-   Pmsg1(50, ">>>> Started thread loop: %d\n", thread->id);
-
-   as_buffer_t *buffer = NULL;
-
-   while (as_quit_producer_thread_loop() == false)
-   {
-      buffer = as_acquire_buffer();
-
-      if (buffer == NULL)
-      {
-    	  // No free buffers
-    	  continue;
-      }
-
-      sleep(1);
-      // do stuff with buffer
-
-      // buffer is full, move to sender queue
-      ASSERT(buffer);
-      as_consumer_enqueue_buffer(buffer);
-   }
-
-   Pmsg1(50, ">>>> Quit thread loop: %d\n", thread->id);
-
-   return NULL;
-}
-#endif // AS_LEGACY_PRODUCERS
 
 bool as_workqueue_engine_quit()
 {
@@ -368,29 +298,6 @@ static void as_init_consumer_thread()
 	Pmsg0(50, ">>>> Init consumer thread\n");
 }
 
-#if AS_LEGACY_PRODUCERS
-void as_init_producer_threads_queue()
-{
-	pthread_mutex_lock(&as_producer_thread_lock);
-
-   as_producer_threads_quit = false;
-
-   for (int i = 0; i < AS_PRODUCER_THREADS; ++i)
-   {
-      as_producer_threads[i].id = AS_THREAD_BASE_ID + i;
-
-      Pmsg1(50, ">>>> Starting thread: %d\n", as_producer_threads[i].id);
-
-      pthread_create(&as_producer_threads[i].thread, NULL, as_producer_thread_loop, &as_producer_threads[i]);
-
-      QINSERT(&as_producer_threads_queue, &as_producer_threads[i].bq);
-
-      Pmsg1(50, ">>>> Started thread: %d\n", as_producer_threads[i].id);
-   }
-
-	pthread_mutex_unlock(&as_producer_thread_lock);
-}
-#endif // AS_LEGACY_PRODUCERS
 
 
 
@@ -408,56 +315,17 @@ static void as_workqueue_init()
 static void as_init()
 {
 	Pmsg0(50, ">>>> INIT BEGIN\n");
+
 	as_init_free_buffers_queue();
 	as_init_consumer_thread();
 	as_workqueue_init();
 
-#if AS_LEGACY_PRODUCERS
-	// TODO remove
-	// as_init_producer_threads_queue();
-#endif
 	Pmsg0(50, ">>>> INIT END\n");
 }
 
 //
 // Shutdown
 //
-#if AS_LEGACY_PRODUCERS
-static void as_request_producer_threads_quit()
-{
-   Pmsg0(50, ">>>> Request producer threads quit\n");
-   pthread_mutex_lock(&as_producer_thread_lock);
-   as_producer_threads_quit = true;
-   pthread_mutex_unlock(&as_producer_thread_lock);
-}
-
-static void as_join_producer_threads()
-{
-   for (int i = 0; i < AS_PRODUCER_THREADS; ++i)
-   {
-      Pmsg1(50, ">>>> Joining producer thread: %d\n", as_producer_threads[i].id);
-      pthread_join(as_producer_threads[i].thread, NULL);
-   }
-}
-
-static void as_clear_producer_threads_queue()
-{
-   as_thread_t *thread = NULL;
-
-   pthread_mutex_lock(&as_producer_thread_lock);
-
-   do
-   {
-      thread = (as_thread_t *)QREMOVE(&as_producer_threads_queue);
-      if (thread)
-      {
-         Pmsg1(50, ">>>> Removed producer thread from queue: %d\n", thread->id);
-      }
-   } while (thread != NULL);
-
-   pthread_mutex_unlock(&as_producer_thread_lock);
-}
-#endif // AS_LEGACY_PRODUCERS
 
 static void as_request_consumer_thread_quit()
 {
@@ -533,13 +401,6 @@ static void as_shutdown()
 
    as_workqueue_destroy();
 
-#if AS_LEGACY_PRODUCERS
-   // TODO remove
-   //as_request_producer_threads_quit();
-   //as_join_producer_threads();
-   //as_clear_producer_threads_queue();
-#endif
-
    as_request_consumer_thread_quit();
    as_join_consumer_thread();
    as_release_remaining_consumer_buffers();
@@ -548,34 +409,6 @@ static void as_shutdown()
 
    Pmsg0(50, ">>>> SHUTDOWN END\n");
 }
-
-//
-// Other TODO
-//
-#if AS_LEGACY_PRODUCERS
-static void as_acquire_thread()
-{
-	as_thread_t *thread = NULL;
-
-	pthread_mutex_lock(&as_producer_thread_lock);
-
-	do
-	{
-		thread = (as_thread_t *)QREMOVE(&as_producer_threads_queue);
-		if (thread)
-		{
-			Pmsg1(50, ">>>> Acquired producer thread from queue: %d\n", thread->id);
-		}
-	} while (thread == NULL);
-
-	pthread_mutex_unlock(&as_producer_thread_lock);
-}
-#endif // AS_LEGACY_PRODUCERS
-
-
-
-
-
 
 /**
  * Find all the requested files and send them
