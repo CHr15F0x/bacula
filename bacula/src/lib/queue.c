@@ -157,3 +157,28 @@ int qsize(BQUEUE *qhead)
 #undef qh
 }
 
+/*  QINSERT_AFTER  --  Insert object after an element
+                       If the 'after' element is NULL, then insert as the first element */
+
+void qinsert_after(BQUEUE *qhead, BQUEUE *after, BQUEUE *object)
+{
+#define qh ((BQUEUE *)qhead)
+#define aft ((BQUEUE *)after)
+#define obj ((BQUEUE *)object)
+
+        ASSERT(qh->qprev->qnext == qh);
+        ASSERT(qh->qnext->qprev == qh);
+
+        if (aft == NULL)
+        {
+           after = qh;
+        }
+
+        obj->qnext = aft->qnext;
+        obj->qprev = aft;
+        obj->qnext->qprev = obj;
+        aft->qnext = obj;
+#undef qh
+#undef aft
+#undef obj
+}

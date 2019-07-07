@@ -35,4 +35,6 @@ void    qinsert(BQUEUE *qhead, BQUEUE *object);
 BQUEUE *qnext(BQUEUE *qhead, BQUEUE *qitem);
 BQUEUE *qdchain(BQUEUE *qitem);
 BQUEUE *qremove(BQUEUE *qhead);
-int qsize(BQUEUE *qhead);
+int     qsize(BQUEUE *qhead);
+void    qinsert_after(BQUEUE *qhead, BQUEUE *after, BQUEUE *object);
+
