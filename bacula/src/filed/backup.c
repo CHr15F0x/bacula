@@ -378,19 +378,10 @@ static void as_init_consumer_thread(BSOCK *sd)
 	Pmsg0(50, ">>>> Init consumer thread\n");
 }
 
-
-
-
-
-
-
-
 static void as_workqueue_init()
 {
    workq_init(&as_work_queue, AS_PRODUCER_THREADS, as_workqueue_engine);
 }
-
-
 
 static void as_init(BSOCK *sd)
 {
@@ -489,6 +480,144 @@ static void as_shutdown()
 
    Pmsg0(50, ">>>> SHUTDOWN END\n");
 }
+
+class AS_BSOCK_PROXY
+{
+public:
+
+   POOLMEM *msg;
+   int32_t msglen;
+
+private:
+
+   as_buffer_t *as_buf;
+
+public:
+
+   AS_BSOCK_PROXY()
+   {}
+
+   void init()
+   {
+      memset(this, 0, sizeof(AS_BSOCK_PROXY));
+   }
+
+   bool send()
+   {
+      /* New file to be sent */
+      if (as_buf == NULL)
+      {
+         as_buf = as_acquire_buffer(NULL);
+      }
+      /* Big file, header won't fit, need another buffer */
+      else if (as_buf->size + sizeof(msglen) > AS_BUFFER_CAPACITY)
+      {
+         /* Make sure the current buffer is marked for big file */
+         as_buf->parent = this;
+         as_consumer_enqueue_buffer(as_buf, false);
+         /* Get a new one which is already marked */
+         as_buf = as_acquire_buffer(this);
+      }
+
+      /* Put the lenght of data first */
+      memcpy(&as_buf->data[as_buf->size], &msglen, sizeof(msglen));
+      as_buf->size += sizeof(msglen);
+
+      /* This is a signal, there is no msg data */
+      if (msglen < 0)
+      {
+         return true;
+      }
+
+      /* Put the real message next */
+      char *pos = msg;
+      int32_t to_send = msglen;
+
+      while (to_send > AS_BUFFER_CAPACITY)
+      {
+         /* Fill the current buffer */
+         int32_t send_now = AS_BUFFER_CAPACITY - as_buf->size;
+         memcpy(&as_buf->data[as_buf->size], pos, send_now);
+         as_buf->size += send_now;
+         pos += send_now;
+         to_send -= send_now;
+
+         /* Make sure the current buffer is marked for big file */
+         as_buf->parent = this;
+         as_consumer_enqueue_buffer(as_buf, false);
+         /* Get a new one which is already marked */
+         as_buf = as_acquire_buffer(this);
+      }
+
+      if (to_send > 0)
+      {
+         memcpy(&as_buf->data[as_buf->size], pos, to_send);
+         as_buf->size += to_send;
+      }
+
+      return true;
+   }
+
+   /**
+    * Based on BSOCK::fsend
+    */
+   bool fsend(const char *fmt, ...)
+   {
+      va_list arg_ptr;
+      int maxlen;
+
+      for (;;)
+      {
+         maxlen = msglen - 1;
+         va_start(arg_ptr, fmt);
+         msglen = bvsnprintf(msg, maxlen, fmt, arg_ptr);
+         va_end(arg_ptr);
+         if (msglen > 0 && msglen < (maxlen - 5))
+         {
+            break;
+         }
+         msg = (POOLMEM *)realloc(msg, maxlen + maxlen / 2);
+      }
+      return send();
+   }
+
+   bool signal(int signal)
+   {
+      msglen = signal;
+      return send();
+   }
+
+   void finalize()
+   {
+      if (as_buf)
+      {
+         as_consumer_enqueue_buffer(as_buf, true);
+         as_buf = NULL;
+      }
+   }
+
+   void destroy()
+   {
+      if (msg)
+      {
+         free(msg);
+         msg = NULL;
+      }
+
+      free(this);
+   }
+};
+
+AS_BSOCK_PROXY *new_as_bsock_proxy()
+{
+   AS_BSOCK_PROXY *bsock = (AS_BSOCK_PROXY *)malloc(sizeof(AS_BSOCK_PROXY));
+   bsock->init();
+   return bsock;
+}
+
+
+
+
 
 /**
  * Find all the requested files and send them
