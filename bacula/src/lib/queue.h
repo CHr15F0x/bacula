@@ -19,6 +19,8 @@
    Bacula® is a registered trademark of Kern Sibbald.
 */
 
+#ifndef __QUEUE_H
+#define __QUEUE_H
 
 /*  General purpose queue  */
 
@@ -38,3 +40,4 @@ BQUEUE *qremove(BQUEUE *qhead);
 int     qsize(BQUEUE *qhead);
 void    qinsert_after(BQUEUE *qhead, BQUEUE *after, BQUEUE *object);
 
+#endif /* __QUEUE_H */

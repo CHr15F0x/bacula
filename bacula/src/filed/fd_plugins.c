@@ -759,7 +759,12 @@ bail_out:
 /**
  * Send plugin name start/end record to SD
  */
+
+#if AS_BACKUP
+bool send_plugin_name(JCR *jcr, AS_BSOCK_PROXY *sd, bool start)
+#else
 bool send_plugin_name(JCR *jcr, BSOCK *sd, bool start)
+#endif
 {
    int stat;
    int index = jcr->JobFiles;

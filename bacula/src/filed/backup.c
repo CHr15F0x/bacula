@@ -25,6 +25,8 @@
 #include "filed.h"
 #include "ch.h"
 
+#include "as_bsock_proxy.h"
+
 #ifdef HAVE_DARWIN_OS
 const bool have_darwin_os = true;
 #else
@@ -49,573 +51,18 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest, DIGES
 bool encode_and_send_attributes(JCR *jcr, FF_PKT *ff_pkt, int &data_stream);
 static bool crypto_session_start(JCR *jcr);
 static void crypto_session_end(JCR *jcr);
-static bool crypto_session_send(JCR *jcr, BSOCK *sd);
-static void close_vss_backup_session(JCR *jcr);
+#if AS_BACKUP
 
-//
-// AS TODO
-// condition variables for buffers which are ready to be used
-// or buffers which can be consumed by the consumer thread
-//
+#warning "ASYNC"
 
-#define AS_DEBUG 0
-#define AS_BUFFER_BASE 1000
-
-#if AS_DEBUG
-#define QINSERT(head, object) 	{ Pmsg4(50, ">>>> QINSERT %s %d %s %s\n", __FILE__, __LINE__, #head, #object); qinsert(head, object); }
-BQUEUE *qremove_wrapper(char *file, int line, char* headstr, BQUEUE *qhead)
-{
-	Pmsg3(50, ">>>> QREMOVE %s %d %s\n", file, line, headstr);
-	return qremove(qhead);
-}
-#define QREMOVE(head) qremove_wrapper(__FILE__, __LINE__, #head, head)
+static bool crypto_session_send(JCR *jcr, AS_BSOCK_PROXY *sd);
 #else
-#define QINSERT qinsert
-#define QREMOVE qremove
-#endif // !AS_DEBUG
 
-class AS_BSOCK_PROXY;
-static bool as_workqueue_engine_quit();
+#warning "NO ASYNC"
 
-//
-// Producer related data structures
-//
-#define AS_PRODUCER_THREADS 1
-
-// TODO is one instance enough? Can bacula jobs be scheduled concurently?
-static workq_t as_work_queue = { 0 };
-
-// AS TODO tutaj dodać muteksy do danych które mogą być dzielone między workerami
-// 1. dla JCR
-// ... ?
-
-
-//
-// Consumer related data structures
-//
-// AS TODO ten muteks jest tylko do wychodzenia z pętli wątku
-pthread_mutex_t as_consumer_thread_lock = PTHREAD_MUTEX_INITIALIZER;
-
-pthread_t as_consumer_thread = 0;
-
-bool as_consumer_thread_quit = false;
-
-static BQUEUE as_consumer_buffer_queue =
-{
-   &as_consumer_buffer_queue,
-   &as_consumer_buffer_queue
-};
-
-AS_BSOCK_PROXY *as_bigfile_bsock_proxy = NULL;
-
-
-
-typedef struct
-{
-
-} as_send_file_ctxt_t;
-//
-// Data structures shared between producer threads and consumer thread
-//
-
-#define AS_BUFFERS (AS_PRODUCER_THREADS + 1)
-#define AS_BUFFER_CAPACITY 1024*1024*5
-
-typedef struct
-{
-   BQUEUE bq;
-   char data[AS_BUFFER_CAPACITY];
-   int32_t size;
-   int id; // For testing
-   AS_BSOCK_PROXY *parent; /** Only set when a total file trasfer size is bigger than one buffer */
-} as_buffer_t;
-
-// AS TODO use condition variable
-// AS TODO dwa muteksy - jeden dla buforów wolnych, drugi dla kolejki dla konsumenta
-pthread_mutex_t as_buffer_lock = PTHREAD_MUTEX_INITIALIZER;
-
-static BQUEUE as_free_buffer_queue =
-{
-   &as_free_buffer_queue,
-   &as_free_buffer_queue
-};
-
-//
-// Producer loop
-//
-
-static as_buffer_t *as_acquire_buffer(AS_BSOCK_PROXY *parent)
-{
-   as_buffer_t *buffer = NULL;
-
-   pthread_mutex_lock(&as_buffer_lock);
-   pthread_mutex_unlock(&as_buffer_lock);
-
-
-   /** Wait for a buffer to become available */
-   while (as_workqueue_engine_quit() == false)
-   {
-      pthread_mutex_lock(&as_buffer_lock);
-      buffer = (as_buffer_t *)QREMOVE(&as_free_buffer_queue);
-      pthread_mutex_unlock(&as_buffer_lock);
-
-      if (buffer)
-      {
-         buffer->parent = parent;
-         buffer->size = 0;
-         Pmsg2(50, ">>>> Acquired: %d, free buffers: %d\n", buffer->id, qsize(&as_free_buffer_queue));
-         break;
-      }
-   }
-
-   return buffer;
-}
-
-static void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
-{
-	pthread_mutex_lock(&as_buffer_lock);
-
-	if (as_bigfile_bsock_proxy == NULL)
-	{
-	   as_bigfile_bsock_proxy = buffer->parent;
-
-	   Pmsg1(50, ">>>> Consumer enqueue BEGIN: %d\n", buffer->id);
-	   QINSERT(&as_consumer_buffer_queue, &buffer->bq);
-	   Pmsg1(50, ">>>> Consumer enqueue END: %d\n", buffer->id);
-	}
-	else if (as_bigfile_bsock_proxy == buffer->parent)
-	{
-      Pmsg1(50, ">>>> Consumer enqueue BEGIN: %d\n", buffer->id);
-      // TODO continue this big file
-	   // Find the last buffer in the queue which refers to this file
-      as_buffer_t *last = NULL;
-
-      do
-      {
-         last = (as_buffer_t *)qnext(&as_consumer_buffer_queue, &last->bq);
-
-         if (last->parent == as_bigfile_bsock_proxy)
-         {
-            break;
-         }
-
-      } while (last != NULL);
-
-	   // Buffers for this big file can have already been sent, then put this buffer at the beginning of the queue
-      // Or are still in the queue, then put the buffer after the last buffer for this file
-      qinsert_after(&as_consumer_buffer_queue, &last->bq, &buffer->bq);
-
-      if (finalize)
-      {
-         // This was the last buffer for this big file
-         as_bigfile_bsock_proxy = NULL;
-      }
-
-      Pmsg1(50, ">>>> Consumer enqueue END: %d\n", buffer->id);
-	}
-	else // as_bigfile_bsock_proxy != buffer->parent
-	{
-	   // Wanna start a bigfile but aleady another one is before us in the queue
-      Pmsg1(50, ">>>> Consumer enqueue BEGIN: %d\n", buffer->id);
-	   QINSERT(&as_consumer_buffer_queue, &buffer->bq);
-      Pmsg1(50, ">>>> Consumer enqueue END: %d\n", buffer->id);
-	}
-
-	pthread_mutex_unlock(&as_buffer_lock);
-}
-
-static bool as_workqueue_engine_quit()
-{
-   bool quit = false;
-
-   P(as_work_queue.mutex);
-   quit = as_work_queue.quit;
-   V(as_work_queue.mutex);
-
-   return quit;
-}
-
-void *as_workqueue_engine(void *arg)
-{
-#if 0
-   // TODO process an entire file until it is done
-   // TODO bail out if job cancelled
-
-   char *fname = (char *)arg;
-   Pmsg1(50, ">>>> Work queue as_engine: %s\n", fname);
-   free(fname);
-
-
-   as_buffer_t *buffer = NULL;
-
-   while (as_workqueue_engine_quit() == false)
-   {
-      buffer = as_acquire_buffer();
-
-      if (buffer == NULL)
-      {
-         // Wait for a buffer to become available
-         continue;
-      }
-
-      // read file or part of file
-      // break out of loop if done
-      // otherwise use another buffer
-      usleep(200000);
-
-      // buffer is full or file size is less than buffer length,
-      // move to sender queue
-      ASSERT(buffer);
-      as_consumer_enqueue_buffer(buffer);
-
-      // TODO simulate file is done
-      break;
-   }
+static bool crypto_session_send(JCR *jcr, BSOCK *sd);
 #endif
-   return NULL;
-}
-
-//
-// Consumer loop
-//
-
-static bool as_quit_consumer_thread_loop()
-{
-   bool quit = false;
-   pthread_mutex_lock(&as_consumer_thread_lock);
-   quit = as_consumer_thread_quit;
-   pthread_mutex_unlock(&as_consumer_thread_lock);
-   return quit;
-}
-
-static as_buffer_t *as_consumer_dequeue_buffer()
-{
-   as_buffer_t *buffer = NULL;
-
-  pthread_mutex_lock(&as_buffer_lock);
-  buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
-  pthread_mutex_unlock(&as_buffer_lock);
-
-  if (buffer)
-  {
-	   Pmsg2(50, ">>>> Consumer dequeued: %d, consumer queue size: %d\n", buffer->id, qsize(&as_consumer_buffer_queue));
-  }
-
-   return buffer;
-}
-
-static void as_release_buffer(as_buffer_t *buffer)
-{
-   pthread_mutex_lock(&as_buffer_lock);
-   Pmsg1(50, ">>>> Release buffer BEGIN: %d\n", buffer->id);
-
-   buffer->size = 0; // Not really needed
-   buffer->parent = NULL; // Not really needed
-
-   QINSERT(&as_free_buffer_queue, &buffer->bq);
-
-	Pmsg1(50, ">>>> Release buffer END: %d\n", buffer->id);
-   pthread_mutex_unlock(&as_buffer_lock);
-}
-
-static void *as_consumer_thread_loop(void *arg)
-{
-   Pmsg0(50, ">>>> Started consumer thread loop\n");
-
-   BSOCK *sd = (BSOCK *)arg;
-
-   as_buffer_t *buffer = NULL;
-
-   while (as_quit_consumer_thread_loop() == false)
-   {
-      buffer = as_consumer_dequeue_buffer();
-
-      if (buffer == NULL)
-      {
-    	  // Send queue empty
-    	  continue;
-      }
-
-      usleep(100000);
-      // Buffer was sent
-
-      ASSERT(buffer);
-      as_release_buffer(buffer);
-   }
-
-   Pmsg0(50, ">>>> Quit consumer thread loop\n");
-
-   return NULL;
-}
-
-//
-// Initialization
-//
-static void as_init_free_buffers_queue()
-{
-   as_buffer_t *buffer = NULL;
-
-   Pmsg1(50, ">>>> Init free buffers BEGIN: %d\n", qsize(&as_free_buffer_queue));
-
-   for (int i = 0; i < AS_BUFFERS; ++i)
-   {
-      buffer = (as_buffer_t *)malloc(AS_BUFFER_CAPACITY);
-      buffer->id = AS_BUFFER_BASE + i;
-      QINSERT(&as_free_buffer_queue, &buffer->bq);
-   }
-
-   Pmsg1(50, ">>>> Init free buffers END: %d\n", qsize(&as_free_buffer_queue));
-
-   ASSERT(AS_BUFFERS == qsize(&as_free_buffer_queue));
-}
-
-static void as_init_consumer_thread(BSOCK *sd)
-{
-	as_consumer_thread_quit = false;
-
-	pthread_create(&as_consumer_thread, NULL, as_consumer_thread_loop, (void *)sd);
-
-	Pmsg0(50, ">>>> Init consumer thread\n");
-}
-
-static void as_workqueue_init()
-{
-   workq_init(&as_work_queue, AS_PRODUCER_THREADS, as_workqueue_engine);
-}
-
-static void as_init(BSOCK *sd)
-{
-	Pmsg0(50, ">>>> INIT BEGIN\n");
-
-	as_init_free_buffers_queue();
-	as_init_consumer_thread(sd);
-	as_workqueue_init();
-
-	Pmsg0(50, ">>>> INIT END\n");
-}
-
-//
-// Shutdown
-//
-
-static void as_request_consumer_thread_quit()
-{
-	Pmsg0(50, ">>>> Request consumer thread quit\n");
-   pthread_mutex_lock(&as_consumer_thread_lock);
-   as_consumer_thread_quit = true;
-   pthread_mutex_unlock(&as_consumer_thread_lock);
-}
-
-static void as_join_consumer_thread()
-{
-	Pmsg0(50, ">>>> Joining consumer thread\n");
-	pthread_join(as_consumer_thread, NULL);
-}
-
-static void as_release_remaining_consumer_buffers()
-{
-	as_buffer_t *buffer = NULL;
-
-	pthread_mutex_lock(&as_buffer_lock);
-
-	Pmsg1(50, ">>>> Release remaining consumer buffers BEGIN, consumer queue size: %d\n", qsize(&as_consumer_buffer_queue));
-
-	do
-	{
-		buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
-		if (buffer != NULL)
-		{
-			Pmsg1(50, ">>>> Release remaining consumer buffer: %d\n", buffer->id);
-			QINSERT(&as_free_buffer_queue, &buffer->bq);
-		}
-	} while (buffer != NULL);
-
-	Pmsg2(50, ">>>> Release remaining consumer buffers END, consumer queue size %d, free queue size %d\n", qsize(&as_consumer_buffer_queue), qsize(&as_free_buffer_queue));
-
-	pthread_mutex_unlock(&as_buffer_lock);
-
-	ASSERT(0 == qsize(&as_consumer_buffer_queue));
-}
-
-void as_clear_free_buffers_queue()
-{
-   Pmsg1(50, ">>>> Clear free buffers queue BEGIN, size %d\n", qsize(&as_free_buffer_queue));
-   ASSERT(AS_BUFFERS == qsize(&as_free_buffer_queue));
-
-   as_buffer_t *buffer = NULL;
-   int buffer_counter = 0;
-
-   do
-   {
-      buffer = (as_buffer_t *)QREMOVE(&as_free_buffer_queue);
-      if (buffer)
-      {
-         // Smart alloc does not allow free(NULL), which is inconsistent with how free works
-         free(buffer);
-         ++buffer_counter;
-      }
-   } while (buffer != NULL);
-
-   Pmsg1(50, ">>>> Clear free buffers queue END, size %d\n", qsize(&as_free_buffer_queue));
-   ASSERT(0 == qsize(&as_free_buffer_queue));
-   ASSERT(buffer_counter == AS_BUFFERS);
-}
-
-static void as_workqueue_destroy()
-{
-   workq_destroy(&as_work_queue);
-}
-
-static void as_shutdown()
-{
-   Pmsg0(50, ">>>> SHUTDOWN BEGIN\n");
-
-   as_workqueue_destroy();
-
-   as_request_consumer_thread_quit();
-   as_join_consumer_thread();
-   as_release_remaining_consumer_buffers();
-
-   as_clear_free_buffers_queue();
-
-   Pmsg0(50, ">>>> SHUTDOWN END\n");
-}
-
-class AS_BSOCK_PROXY
-{
-public:
-
-   POOLMEM *msg;
-   int32_t msglen;
-
-private:
-
-   as_buffer_t *as_buf;
-
-public:
-
-   AS_BSOCK_PROXY()
-   {}
-
-   void init()
-   {
-      memset(this, 0, sizeof(AS_BSOCK_PROXY));
-   }
-
-   bool send()
-   {
-      /* New file to be sent */
-      if (as_buf == NULL)
-      {
-         as_buf = as_acquire_buffer(NULL);
-      }
-      /* Big file, header won't fit, need another buffer */
-      else if (as_buf->size + sizeof(msglen) > AS_BUFFER_CAPACITY)
-      {
-         /* Make sure the current buffer is marked for big file */
-         as_buf->parent = this;
-         as_consumer_enqueue_buffer(as_buf, false);
-         /* Get a new one which is already marked */
-         as_buf = as_acquire_buffer(this);
-      }
-
-      /* Put the lenght of data first */
-      memcpy(&as_buf->data[as_buf->size], &msglen, sizeof(msglen));
-      as_buf->size += sizeof(msglen);
-
-      /* This is a signal, there is no msg data */
-      if (msglen < 0)
-      {
-         return true;
-      }
-
-      /* Put the real message next */
-      char *pos = msg;
-      int32_t to_send = msglen;
-
-      while (to_send > AS_BUFFER_CAPACITY)
-      {
-         /* Fill the current buffer */
-         int32_t send_now = AS_BUFFER_CAPACITY - as_buf->size;
-         memcpy(&as_buf->data[as_buf->size], pos, send_now);
-         as_buf->size += send_now;
-         pos += send_now;
-         to_send -= send_now;
-
-         /* Make sure the current buffer is marked for big file */
-         as_buf->parent = this;
-         as_consumer_enqueue_buffer(as_buf, false);
-         /* Get a new one which is already marked */
-         as_buf = as_acquire_buffer(this);
-      }
-
-      if (to_send > 0)
-      {
-         memcpy(&as_buf->data[as_buf->size], pos, to_send);
-         as_buf->size += to_send;
-      }
-
-      return true;
-   }
-
-   /**
-    * Based on BSOCK::fsend
-    */
-   bool fsend(const char *fmt, ...)
-   {
-      va_list arg_ptr;
-      int maxlen;
-
-      for (;;)
-      {
-         maxlen = msglen - 1;
-         va_start(arg_ptr, fmt);
-         msglen = bvsnprintf(msg, maxlen, fmt, arg_ptr);
-         va_end(arg_ptr);
-         if (msglen > 0 && msglen < (maxlen - 5))
-         {
-            break;
-         }
-         msg = (POOLMEM *)realloc(msg, maxlen + maxlen / 2);
-      }
-      return send();
-   }
-
-   bool signal(int signal)
-   {
-      msglen = signal;
-      return send();
-   }
-
-   void finalize()
-   {
-      if (as_buf)
-      {
-         as_consumer_enqueue_buffer(as_buf, true);
-         as_buf = NULL;
-      }
-   }
-
-   void destroy()
-   {
-      if (msg)
-      {
-         free(msg);
-         msg = NULL;
-      }
-
-      free(this);
-   }
-};
-
-AS_BSOCK_PROXY *new_as_bsock_proxy()
-{
-   AS_BSOCK_PROXY *bsock = (AS_BSOCK_PROXY *)malloc(sizeof(AS_BSOCK_PROXY));
-   bsock->init();
-   return bsock;
-}
-
-
+static void close_vss_backup_session(JCR *jcr);
 
 
 
@@ -876,7 +323,11 @@ static void crypto_session_end(JCR *jcr)
    }
 }
 
+#if AS_BACKUP
+static bool crypto_session_send(JCR *jcr, AS_BSOCK_PROXY *sd)
+#else
 static bool crypto_session_send(JCR *jcr, BSOCK *sd)
+#endif
 {
    POOLMEM *msgsave;
 
@@ -895,16 +346,6 @@ static bool crypto_session_send(JCR *jcr, BSOCK *sd)
    sd->signal(BNET_EOD);
    return true;
 }
-
-// AS TODO
-static int as_save_file(
-   JCR *jcr,
-   FF_PKT *ff_pkt,
-   bool do_plugin_set,
-   DIGEST *digest,
-   DIGEST *signing_digest,
-   int digest_stream,
-   bool has_file_data);
 
 /**
  * Called here by find() for each file included.
@@ -1154,7 +595,13 @@ int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level)
    }
 
    // AS TODO what to do with the return value?
-   return as_save_file(jcr, ff_pkt, do_plugin_set, digest, signing_digest,
+   return
+#if AS_BACKUP
+   as_save_file_schedule
+#else
+   as_save_file
+#endif
+    (jcr, ff_pkt, do_plugin_set, digest, signing_digest,
       digest_stream, has_file_data);
 
 early_good_rtn:
@@ -1185,7 +632,7 @@ early_good_rtn:
 }
 
 // AS TODO
-static int as_save_file(
+int as_save_file(
    JCR *jcr,
    FF_PKT *ff_pkt,
    bool do_plugin_set,
@@ -1200,8 +647,14 @@ static int as_save_file(
    SIGNATURE *sig = NULL; // AS async local only
    int rtnstat = 0; // AS duplicate, local in both
 
-   BSOCK *sd = jcr->store_bsock;
 
+#if AS_BACKUP
+   AS_BSOCK_PROXY proxy;
+   proxy.init();
+   AS_BSOCK_PROXY *sd = &proxy;
+#else
+   BSOCK *sd = jcr->store_bsock;
+#endif
 
 
    // AS TODO tu lub wyżej sprawdzić czy plik > 5MB, jeśli tak to nie idzie do workera i
@@ -1566,7 +1019,10 @@ bail_out:
 
 
    // AS TODO zasygnalizować koniec przesyłania całego pliku do AS_BSOCK_PROXY
-
+#if AS_BACKUP
+   sd->finalize();
+   proxy.cleanup();
+#endif
 
    return rtnstat;
 }
@@ -1598,15 +1054,6 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
 #ifdef FD_NO_SEND_TEST
    return 1;
 #endif
-
-
-
-
-
-   workq_add(&as_work_queue, (void *)bstrdup(ff_pkt->fname), NULL, 0);
-
-
-
 
    msgsave = sd->msg;
    rbuf = sd->msg;                    /* read buffer */
