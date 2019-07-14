@@ -6,11 +6,23 @@ typedef struct Digest DIGEST;
 struct FF_PKT;
 struct JCR;
 
+// TODO cześć to lokalne funkcje i powinny wylecieć z headera
+
 //
 // AS TODO
 // condition variables for buffers which are ready to be used
 // or buffers which can be consumed by the consumer thread
 //
+
+int my_thread_id();
+int thread_id(pthread_t pth_id);
+
+
+
+
+
+
+
 
 #define AS_DEBUG 0
 #define AS_BUFFER_BASE 1000
@@ -27,8 +39,6 @@ BQUEUE *qremove_wrapper(char *file, int line, char* headstr, BQUEUE *qhead)
 #define QINSERT qinsert
 #define QREMOVE qremove
 #endif // !AS_DEBUG
-
-bool as_workqueue_engine_quit();
 
 //
 // Producer related data structures
@@ -57,7 +67,7 @@ struct as_buffer_t
 
 as_buffer_t *as_acquire_buffer(AS_BSOCK_PROXY *parent);
 void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize);
-bool as_workqueue_engine_quit();
+int as_workqueue_engine_quit();
 
 typedef struct
 {
@@ -69,6 +79,9 @@ typedef struct
    int digest_stream;
    bool has_file_data;
 } as_save_file_context_t;
+
+FF_PKT *as_new_ff_pkt_clone(FF_PKT *ff_pkt);
+void as_free_ff_pkt_clone(FF_PKT *ff_pkt);
 
 int as_save_file(
    JCR *jcr,

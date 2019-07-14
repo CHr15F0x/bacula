@@ -2,28 +2,44 @@
 #include "jcr.h"
 #include "as_bsock_proxy.h"
 
+
+#define SOCK_BASE 1000
+pthread_mutex_t proxy_cnt_lock = PTHREAD_MUTEX_INITIALIZER;
+int proxy_cnt = 0;
+
+
+
+
 AS_BSOCK_PROXY::AS_BSOCK_PROXY()
 {
-   Pmsg1(50, "\t\t>>>> %X AS_BSOCK_PROXY::AS_BSOCK_PROXY()\n", pthread_self());
+   Pmsg1(50, "\t\t>>>> %4d AS_BSOCK_PROXY::AS_BSOCK_PROXY()\n", my_thread_id());
 }
 
 void AS_BSOCK_PROXY::init()
 {
-   Pmsg1(50, "\t\t>>>> %X AS_BSOCK_PROXY::init()\n", pthread_self());
-
    memset(this, 0, sizeof(AS_BSOCK_PROXY));
-   msg = (POOLMEM *)malloc(4096); // for fsend()
-   allocated_size = 4096;
+   msg = get_pool_memory(PM_BSOCK);
+
+   pthread_mutex_lock(&proxy_cnt_lock);
+   id = proxy_cnt + SOCK_BASE;
+   ++proxy_cnt;
+   pthread_mutex_unlock(&proxy_cnt_lock);
+
+   Pmsg2(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::init() this: %p\n", my_thread_id(), id);
 }
 
 bool AS_BSOCK_PROXY::send()
 {
-   Pmsg2(50, "\t\t>>>> %X AS_BSOCK_PROXY::send() %d\n", pthread_self(), msglen);
+   Pmsg3(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::send() %d\n", my_thread_id(), id, msglen);
 
    /* New file to be sent */
    if (as_buf == NULL)
    {
       as_buf = as_acquire_buffer(NULL);
+
+      Pmsg2(50, "\t\t>>>> %4d 1 as_buf: %p\n", my_thread_id(), as_buf);
+      ASSERT(as_buf != NULL);
+      ASSERT(as_buf->size == 0);
    }
    /* Big file, header won't fit, need another buffer */
    else if (as_buf->size + sizeof(msglen) > AS_BUFFER_CAPACITY)
@@ -33,7 +49,15 @@ bool AS_BSOCK_PROXY::send()
       as_consumer_enqueue_buffer(as_buf, false);
       /* Get a new one which is already marked */
       as_buf = as_acquire_buffer(this);
+
+      Pmsg2(50, "\t\t>>>> %4d 1 as_buf: %p\n", my_thread_id(), as_buf);
+
+      ASSERT(as_buf != NULL);
+      ASSERT(as_buf->size == 0);
    }
+
+   ASSERT(as_buf != NULL);
+   ASSERT(as_buf->size <= AS_BUFFER_CAPACITY);
 
    /* Put the lenght of data first */
    memcpy(&as_buf->data[as_buf->size], &msglen, sizeof(msglen));
@@ -79,30 +103,27 @@ bool AS_BSOCK_PROXY::send()
  */
 bool AS_BSOCK_PROXY::fsend(const char *fmt, ...)
 {
-   Pmsg2(50, "\t\t>>>> %X AS_BSOCK_PROXY::fsend() %s\n", pthread_self(), fmt);
+   Pmsg3(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::fsend() %s\n", my_thread_id(), id, fmt);
 
    va_list arg_ptr;
    int maxlen;
 
-   for (;;)
-   {
-      maxlen = allocated_size - 1;
+   for (;;) {
+      maxlen = sizeof_pool_memory(msg) - 1;
       va_start(arg_ptr, fmt);
       msglen = bvsnprintf(msg, maxlen, fmt, arg_ptr);
       va_end(arg_ptr);
-      if (msglen > 0 && msglen < (maxlen - 5))
-      {
+      if (msglen > 0 && msglen < (maxlen - 5)) {
          break;
       }
-      msg = (POOLMEM *)realloc(msg, maxlen + maxlen / 2);
-      allocated_size = maxlen + maxlen / 2;
+      msg = realloc_pool_memory(msg, maxlen + maxlen / 2);
    }
    return send();
 }
 
 bool AS_BSOCK_PROXY::signal(int signal)
 {
-   Pmsg2(50, "\t\t>>>> %X AS_BSOCK_PROXY::signal() %d\n", pthread_self(), signal);
+   Pmsg3(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::signal() %d\n", my_thread_id(), id, signal);
 
    msglen = signal;
    return send();
@@ -110,7 +131,7 @@ bool AS_BSOCK_PROXY::signal(int signal)
 
 void AS_BSOCK_PROXY::finalize()
 {
-   Pmsg2(50, "\t\t>>>> %X AS_BSOCK_PROXY::finalize() %p\n", pthread_self(), as_buf);
+   Pmsg3(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::finalize() %p\n", my_thread_id(), id, as_buf);
 
    if (as_buf)
    {
@@ -121,12 +142,19 @@ void AS_BSOCK_PROXY::finalize()
 
 void AS_BSOCK_PROXY::cleanup()
 {
-   Pmsg2(50, "\t\t>>>> %X AS_BSOCK_PROXY::cleanup() %p\n", pthread_self(), msg);
+   Pmsg3(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::cleanup() %p\n", my_thread_id(), id, msg);
+
+   // TODO VERY IMPORTANT
+   finalize();
 
    if (msg)
    {
-      free(msg);
+      free_pool_memory(msg);
       msg = NULL;
+   }
+   else
+   {
+      Pmsg2(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::cleanup() AGAIN!!!\n", my_thread_id(), id);
    }
 }
 

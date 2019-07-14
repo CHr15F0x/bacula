@@ -17,6 +17,11 @@ private:
    as_buffer_t *as_buf;
    int allocated_size;
 
+
+   // TODO do testowania
+   int id;
+
+
 public:
 
    AS_BSOCK_PROXY();

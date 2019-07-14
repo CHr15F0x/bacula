@@ -30,6 +30,9 @@ bacula: all
 	mkdir tmp working dumps
 	echo "Doing: scripts/setup"
 	scripts/setup
+	rm -r build/*
+	rm -r build/.gitignore
+	cp -R kl/1 build
 
 sed:
 	echo "Doing: scripts/do_sed"

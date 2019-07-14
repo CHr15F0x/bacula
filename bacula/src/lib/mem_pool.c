@@ -63,7 +63,10 @@ static struct s_pool_ctl pool_ctl[] = {
    {  256,  256, 0, 0, NULL },        /* PM_FNAME filename buffers */
    {  512,  512, 0, 0, NULL },        /* PM_MESSAGE message buffer */
    { 1024, 1024, 0, 0, NULL },        /* PM_EMSG error message buffer */
-  {  4096, 4096, 0, 0, NULL }         /* PM_BSOCK message buffer */
+   { 4096, 4096, 0, 0, NULL }         /* PM_BSOCK message buffer */
+#if AS_BACKUP
+  ,{ 4096, 4096, 0, 0, NULL }         /* PM_AS_BSOCK_PROXY message buffer */
+#endif
 };
 #else
 
@@ -75,6 +78,9 @@ static struct s_pool_ctl pool_ctl[] = {
    {   20,   20, 0, 0, NULL },        /* PM_MESSAGE message buffer */
    {   20,   20, 0, 0, NULL },        /* PM_EMSG error message buffer */
    {   20,   20, 0, 0, NULL }         /* PM_BSOCK message buffer */
+#if AS_BACKUP
+  ,{   20,   20, 0, 0, NULL }         /* PM_AS_BSOCK_PROXY message buffer */
+#endif
 };
 #endif
 

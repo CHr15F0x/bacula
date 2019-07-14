@@ -47,19 +47,34 @@ const bool have_xattr = false;
 
 /* Forward referenced functions */
 int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level);
-static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest, DIGEST *signature_digest);
+
+static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest, DIGEST *signature_digest
+#if AS_BACKUP
+      ,AS_BSOCK_PROXY *sd
+#endif
+);
+
 bool encode_and_send_attributes(JCR *jcr, FF_PKT *ff_pkt, int &data_stream);
+static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &data_stream, AS_BSOCK_PROXY *sd);
+
 static bool crypto_session_start(JCR *jcr);
 static void crypto_session_end(JCR *jcr);
+
 #if AS_BACKUP
-
-#warning "ASYNC"
-
+#warning "\
+ASYNC    ASYNC    ASYNC    ASYNC    ASYNC\
+ASYNC    ASYNC    ASYNC    ASYNC    ASYNC\
+ASYNC    ASYNC    ASYNC    ASYNC    ASYNC\
+ASYNC    ASYNC    ASYNC    ASYNC    ASYNC\
+"
 static bool crypto_session_send(JCR *jcr, AS_BSOCK_PROXY *sd);
 #else
-
-#warning "NO ASYNC"
-
+#warning "\
+SYNC     SYNC     SYNC     SYNC     SYNC\
+SYNC     SYNC     SYNC     SYNC     SYNC\
+SYNC     SYNC     SYNC     SYNC     SYNC\
+SYNC     SYNC     SYNC     SYNC     SYNC\
+"
 static bool crypto_session_send(JCR *jcr, BSOCK *sd);
 #endif
 static void close_vss_backup_session(JCR *jcr);
@@ -365,9 +380,7 @@ int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level)
    int digest_stream = STREAM_NONE; // AS both, passed via ctxt
    bool has_file_data = false; // AS both, passed via ctxt
 
-
-
-
+   Pmsg2(50, "\t\t\t>>>> %4d save_file() file: %s\n", my_thread_id(), ff_pkt->fname);
 
    int rtnstat = 0; // AS duplicate, local in both
    struct save_pkt sp;          /* use by option plugin */   // AS save_file
@@ -647,6 +660,7 @@ int as_save_file(
    SIGNATURE *sig = NULL; // AS async local only
    int rtnstat = 0; // AS duplicate, local in both
 
+   Pmsg2(50, "\t\t\t>>>> %4d as_save_file() file: %s\n", my_thread_id(), ff_pkt->fname);
 
 #if AS_BACKUP
    AS_BSOCK_PROXY proxy;
@@ -672,6 +686,8 @@ int as_save_file(
 
    if (do_plugin_set) {
       /* Tell bfile that it needs to call plugin */
+
+      // TODO uwaga - operujemy na kopii ff_pkt
       if (!set_cmd_plugin(&ff_pkt->bfd, jcr)) {
          goto bail_out;
       }
@@ -682,7 +698,11 @@ int as_save_file(
 
    /** Send attributes -- must be done after binit() */
    // AS TODO sprawdzić czy tu mają być jakieś mutexy
+#if AS_BACKUP
+   if (!encode_and_send_attributes_via_proxy(jcr, ff_pkt, data_stream, sd)) {
+#else
    if (!encode_and_send_attributes(jcr, ff_pkt, data_stream)) {
+#endif
       goto bail_out;
    }
    /** Meta data only for restore object */
@@ -734,6 +754,7 @@ int as_save_file(
          tid = NULL;
       }
       int noatime = ff_pkt->flags & FO_NOATIME ? O_NOATIME : 0;
+      // TODO uwaga - operujemy na kopii ff_pkt
       ff_pkt->bfd.reparse_point = (ff_pkt->type == FT_REPARSE ||
                                    ff_pkt->type == FT_JUNCTION);
 
@@ -741,6 +762,8 @@ int as_save_file(
 
       // AS TODO sprawdzić czy tu mają być jakieś mutexy
       if (bopen(&ff_pkt->bfd, ff_pkt->fname, O_RDONLY | O_BINARY | noatime, 0) < 0) {
+
+         // TODO uwaga - operujemy na kopii ff_pkt
          ff_pkt->ff_errno = errno;
          berrno be;
          Jmsg(jcr, M_NOTSAVED, 0, _("     Cannot open \"%s\": ERR=%s.\n"), ff_pkt->fname,
@@ -761,7 +784,11 @@ int as_save_file(
 
       // AS TODO sprawdzić czy tu mają być jakieś mutexy
       // AS TODO ta funkcja też ma pompować dane do bufora zamiast socketa
-      stat = send_data(jcr, data_stream, ff_pkt, digest, signing_digest);
+      stat = send_data(jcr, data_stream, ff_pkt, digest, signing_digest
+#if AS_BACKUP
+         ,sd
+#endif
+      );
 
       if (ff_pkt->flags & FO_CHKCHANGES) {
          has_file_changed(jcr, ff_pkt);
@@ -786,25 +813,34 @@ int as_save_file(
             int flags;
             int rsrc_stream;
             if (!bopen_rsrc(&ff_pkt->bfd, ff_pkt->fname, O_RDONLY | O_BINARY, 0) < 0) {
+               // TODO uwaga - operujemy na kopii ff_pkt
                ff_pkt->ff_errno = errno;
                berrno be;
                Jmsg(jcr, M_NOTSAVED, -1, _("     Cannot open resource fork for \"%s\": ERR=%s.\n"),
                     ff_pkt->fname, be.bstrerror());
                jcr->JobErrors++;
                if (is_bopen(&ff_pkt->bfd)) {
+                  // TODO uwaga - operujemy na kopii ff_pkt
                   bclose(&ff_pkt->bfd);
                }
                goto good_rtn;
             }
             flags = ff_pkt->flags;
+            // TODO uwaga - operujemy na kopii ff_pkt
             ff_pkt->flags &= ~(FO_COMPRESS|FO_SPARSE|FO_OFFSETS);
             if (flags & FO_ENCRYPT) {
                rsrc_stream = STREAM_ENCRYPTED_MACOS_FORK_DATA;
             } else {
                rsrc_stream = STREAM_MACOS_FORK_DATA;
             }
-            stat = send_data(jcr, rsrc_stream, ff_pkt, digest, signing_digest);
+            stat = send_data(jcr, rsrc_stream, ff_pkt, digest, signing_digest
+#if AS_BACKUP
+                  ,sd
+#endif
+            );
+            // TODO uwaga - operujemy na kopii ff_pkt
             ff_pkt->flags = flags;
+            // TODO uwaga - operujemy na kopii ff_pkt
             bclose(&ff_pkt->bfd);
             if (!stat) {
                goto bail_out;
@@ -945,6 +981,7 @@ int as_save_file(
       // AS TODO sprawdzić czy tu mają być jakieś mutexy
       // AS TODO a moze coś innego?
       if (ff_pkt->linked) {
+         // TODO uwaga - operujemy na kopii ff_pkt
          ff_pkt_set_link_digest(ff_pkt, digest_stream, sd->msg, size);
       }
 
@@ -958,6 +995,7 @@ int as_save_file(
       Dmsg2(300, "Link %s digest %d\n", ff_pkt->fname, ff_pkt->digest_len);
       sd->fsend("%ld %d 0", jcr->JobFiles, ff_pkt->digest_stream);
 
+      // AS TODO UWAGA !!!! AS_BSOCK_PROXY powinno używać bufory z mempoola!!!
       sd->msg = check_pool_memory_size(sd->msg, ff_pkt->digest_len);
       memcpy(sd->msg, ff_pkt->digest, ff_pkt->digest_len);
       sd->msglen = ff_pkt->digest_len;
@@ -1017,11 +1055,10 @@ bail_out:
       crypto_sign_free(sig);
    }
 
-
    // AS TODO zasygnalizować koniec przesyłania całego pliku do AS_BSOCK_PROXY
 #if AS_BACKUP
-   sd->finalize();
    proxy.cleanup();
+   as_free_ff_pkt_clone(ff_pkt);
 #endif
 
    return rtnstat;
@@ -1039,9 +1076,15 @@ bail_out:
  * are not handled as sparse files.
  */
 static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
-                     DIGEST *signing_digest)
+                     DIGEST *signing_digest
+#if AS_BACKUP
+   ,AS_BSOCK_PROXY *sd
+#endif
+)
 {
+#if !AS_BACKUP
    BSOCK *sd = jcr->store_bsock;
+#endif
    uint64_t fileAddr = 0;             /* file address */
    char *rbuf, *wbuf;
    int32_t rsize = jcr->buf_size;      /* read buffer size */
@@ -1204,6 +1247,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
    /**
     * Read the file data
     */
+   // TODO uwaga - operujemy na kopii ff_pkt
    while ((sd->msglen=(uint32_t)bread(&ff_pkt->bfd, rbuf, rsize)) > 0) {
 
       /** Check for sparse blocks */
@@ -1448,6 +1492,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
    if (cipher_ctx) {
       crypto_cipher_free(cipher_ctx);
    }
+
    return 1;
 
 err:
@@ -1477,6 +1522,7 @@ bool encode_and_send_attributes(JCR *jcr, FF_PKT *ff_pkt, int &data_stream)
 
    Dmsg1(300, "encode_and_send_attrs fname=%s\n", ff_pkt->fname);
    /** Find what data stream we will use, then encode the attributes */
+   // TODO uwaga - operujemy na kopii ff_pkt
    if ((data_stream = select_data_stream(ff_pkt)) == STREAM_NONE) {
       /* This should not happen */
       Jmsg0(jcr, M_FATAL, 0, _("Invalid file flags, no supported data stream type.\n"));
@@ -1496,6 +1542,8 @@ bool encode_and_send_attributes(JCR *jcr, FF_PKT *ff_pkt, int &data_stream)
 
    jcr->lock();
    jcr->JobFiles++;                    /* increment number of files sent */
+   // TODO poza tym co z dostepem z wielu wątków
+   // TODO uwaga - operujemy na kopii ff_pkt
    ff_pkt->FileIndex = jcr->JobFiles;  /* return FileIndex */
    pm_strcpy(jcr->last_fname, ff_pkt->fname);
    jcr->unlock();
@@ -1565,18 +1613,22 @@ bool encode_and_send_attributes(JCR *jcr, FF_PKT *ff_pkt, int &data_stream)
    case FT_PLUGIN_CONFIG:
    case FT_RESTORE_FIRST:
       comp_len = ff_pkt->object_len;
+      // TODO uwaga - operujemy na kopii ff_pkt
       ff_pkt->object_compression = 0;
       if (ff_pkt->object_len > 1000) {
          /* Big object, compress it */
          comp_len = ff_pkt->object_len + 1000;
          POOLMEM *comp_obj = get_memory(comp_len);
          /* *** FIXME *** check Zdeflate error */
+         // TODO uwaga - operujemy na kopii ff_pkt
          Zdeflate(ff_pkt->object, ff_pkt->object_len, comp_obj, comp_len);
          if (comp_len < ff_pkt->object_len) {
+            // TODO uwaga - operujemy na kopii ff_pkt
             ff_pkt->object = comp_obj;
             ff_pkt->object_compression = 1;    /* zlib level 9 compression */
          } else {
             /* Uncompressed object smaller, use it */
+            // TODO uwaga - operujemy na kopii ff_pkt
             comp_len = ff_pkt->object_len;
          }
          Dmsg2(100, "Object compressed from %d to %d bytes\n", ff_pkt->object_len, comp_len);
@@ -1591,6 +1643,7 @@ bool encode_and_send_attributes(JCR *jcr, FF_PKT *ff_pkt, int &data_stream)
       sd->msglen += comp_len + 1;
       stat = sd->send();
       if (ff_pkt->object_compression) {
+         // TODO uwaga - operujemy na kopii ff_pkt
          free_and_null_pool_memory(ff_pkt->object);
       }
       break;
@@ -1607,6 +1660,173 @@ bool encode_and_send_attributes(JCR *jcr, FF_PKT *ff_pkt, int &data_stream)
    }
 
    if (!IS_FT_OBJECT(ff_pkt->type) && ff_pkt->type != FT_DELETED) {
+      // TODO uwaga - operujemy na kopii ff_pkt
+      unstrip_path(ff_pkt);
+   }
+
+   Dmsg2(300, ">stored: attr len=%d: %s\n", sd->msglen, sd->msg);
+   if (!stat && !jcr->is_job_canceled()) {
+      Jmsg1(jcr, M_FATAL, 0, _("Network send error to SD. ERR=%s\n"),
+            sd->bstrerror());
+   }
+   sd->signal(BNET_EOD);            /* indicate end of attributes data */
+   return stat;
+}
+
+static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &data_stream, AS_BSOCK_PROXY *sd)
+{
+   char attribs[MAXSTRING];
+   char attribsExBuf[MAXSTRING];
+   char *attribsEx = NULL;
+   int attr_stream;
+   int comp_len;
+   bool stat;
+   int hangup = get_hangup();
+#ifdef FD_NO_SEND_TEST
+   return true;
+#endif
+
+   Dmsg1(300, "encode_and_send_attrs fname=%s\n", ff_pkt->fname);
+   /** Find what data stream we will use, then encode the attributes */
+   // TODO uwaga - operujemy na kopii ff_pkt
+   if ((data_stream = select_data_stream(ff_pkt)) == STREAM_NONE) {
+      /* This should not happen */
+      Jmsg0(jcr, M_FATAL, 0, _("Invalid file flags, no supported data stream type.\n"));
+      return false;
+   }
+   encode_stat(attribs, &ff_pkt->statp, sizeof(ff_pkt->statp), ff_pkt->LinkFI, data_stream);
+
+   /** Now possibly extend the attributes */
+   if (IS_FT_OBJECT(ff_pkt->type)) {
+      attr_stream = STREAM_RESTORE_OBJECT;
+   } else {
+      attribsEx = attribsExBuf;
+      attr_stream = encode_attribsEx(jcr, attribsEx, ff_pkt);
+   }
+
+   Dmsg3(300, "File %s\nattribs=%s\nattribsEx=%s\n", ff_pkt->fname, attribs, attribsEx);
+
+   jcr->lock();
+   jcr->JobFiles++;                    /* increment number of files sent */
+   // TODO poza tym co z dostepem z wielu wątków
+   // TODO uwaga - operujemy na kopii ff_pkt
+   ff_pkt->FileIndex = jcr->JobFiles;  /* return FileIndex */
+   pm_strcpy(jcr->last_fname, ff_pkt->fname);
+   jcr->unlock();
+
+   /* Debug code: check if we must hangup */
+   if (hangup && (jcr->JobFiles > (uint32_t)hangup)) {
+      Jmsg1(jcr, M_FATAL, 0, "Debug hangup requested after %d files.\n", hangup);
+      set_hangup(0);
+      return false;
+   }
+
+   /**
+    * Send Attributes header to Storage daemon
+    *    <file-index> <stream> <info>
+    */
+   if (!sd->fsend("%ld %d 0", jcr->JobFiles, attr_stream)) {
+      if (!jcr->is_canceled()) {
+         Jmsg1(jcr, M_FATAL, 0, _("Network send error to SD. ERR=%s\n"),
+               sd->bstrerror());
+      }
+      return false;
+   }
+   Dmsg1(300, ">stored: attrhdr %s\n", sd->msg);
+
+   /**
+    * Send file attributes to Storage daemon
+    *   File_index
+    *   File type
+    *   Filename (full path)
+    *   Encoded attributes
+    *   Link name (if type==FT_LNK or FT_LNKSAVED)
+    *   Encoded extended-attributes (for Win32)
+    *
+    * or send Restore Object to Storage daemon
+    *   File_index
+    *   File_type
+    *   Object_index
+    *   Object_len  (possibly compressed)
+    *   Object_full_len (not compressed)
+    *   Object_compression
+    *   Plugin_name
+    *   Object_name
+    *   Binary Object data
+    *
+    * For a directory, link is the same as fname, but with trailing
+    * slash. For a linked file, link is the link.
+    */
+   if (!IS_FT_OBJECT(ff_pkt->type) && ff_pkt->type != FT_DELETED) { /* already stripped */
+      strip_path(ff_pkt);
+   }
+   switch (ff_pkt->type) {
+   case FT_LNK:
+   case FT_LNKSAVED:
+      Dmsg3(300, "Link %d %s to %s\n", jcr->JobFiles, ff_pkt->fname, ff_pkt->link);
+      stat = sd->fsend("%ld %d %s%c%s%c%s%c%s%c%u%c", jcr->JobFiles,
+                       ff_pkt->type, ff_pkt->fname, 0, attribs, 0,
+                       ff_pkt->link, 0, attribsEx, 0, ff_pkt->delta_seq, 0);
+      break;
+   case FT_DIREND:
+   case FT_REPARSE:
+   case FT_JUNCTION:
+      /* Here link is the canonical filename (i.e. with trailing slash) */
+      stat = sd->fsend("%ld %d %s%c%s%c%c%s%c%u%c", jcr->JobFiles,
+                       ff_pkt->type, ff_pkt->link, 0, attribs, 0, 0,
+                       attribsEx, 0, ff_pkt->delta_seq, 0);
+      break;
+   case FT_PLUGIN_CONFIG:
+   case FT_RESTORE_FIRST:
+      comp_len = ff_pkt->object_len;
+      // TODO uwaga - operujemy na kopii ff_pkt
+      ff_pkt->object_compression = 0;
+      if (ff_pkt->object_len > 1000) {
+         /* Big object, compress it */
+         comp_len = ff_pkt->object_len + 1000;
+         POOLMEM *comp_obj = get_memory(comp_len);
+         /* *** FIXME *** check Zdeflate error */
+         // TODO uwaga - operujemy na kopii ff_pkt
+         Zdeflate(ff_pkt->object, ff_pkt->object_len, comp_obj, comp_len);
+         if (comp_len < ff_pkt->object_len) {
+            // TODO uwaga - operujemy na kopii ff_pkt
+            ff_pkt->object = comp_obj;
+            ff_pkt->object_compression = 1;    /* zlib level 9 compression */
+         } else {
+            /* Uncompressed object smaller, use it */
+            // TODO uwaga - operujemy na kopii ff_pkt
+            comp_len = ff_pkt->object_len;
+         }
+         Dmsg2(100, "Object compressed from %d to %d bytes\n", ff_pkt->object_len, comp_len);
+      }
+      sd->msglen = Mmsg(sd->msg, "%d %d %d %d %d %d %s%c%s%c",
+                        jcr->JobFiles, ff_pkt->type, ff_pkt->object_index,
+                        comp_len, ff_pkt->object_len, ff_pkt->object_compression,
+                        ff_pkt->fname, 0, ff_pkt->object_name, 0);
+      sd->msg = check_pool_memory_size(sd->msg, sd->msglen + comp_len + 2);
+      memcpy(sd->msg + sd->msglen, ff_pkt->object, comp_len);
+      /* Note we send one extra byte so Dir can store zero after object */
+      sd->msglen += comp_len + 1;
+      stat = sd->send();
+      if (ff_pkt->object_compression) {
+         // TODO uwaga - operujemy na kopii ff_pkt
+         free_and_null_pool_memory(ff_pkt->object);
+      }
+      break;
+   case FT_REG:
+      stat = sd->fsend("%ld %d %s%c%s%c%c%s%c%d%c", jcr->JobFiles,
+               ff_pkt->type, ff_pkt->fname, 0, attribs, 0, 0, attribsEx, 0,
+               ff_pkt->delta_seq, 0);
+      break;
+   default:
+      stat = sd->fsend("%ld %d %s%c%s%c%c%s%c%u%c", jcr->JobFiles,
+                       ff_pkt->type, ff_pkt->fname, 0, attribs, 0, 0,
+                       attribsEx, 0, ff_pkt->delta_seq, 0);
+      break;
+   }
+
+   if (!IS_FT_OBJECT(ff_pkt->type) && ff_pkt->type != FT_DELETED) {
+      // TODO uwaga - operujemy na kopii ff_pkt
       unstrip_path(ff_pkt);
    }
 

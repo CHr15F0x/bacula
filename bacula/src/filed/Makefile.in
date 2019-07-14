@@ -30,6 +30,7 @@ dummy:
 
 #
 SVRSRCS = filed.c authenticate.c acl.c backup.c estimate.c \
+	  as_bsock_proxy.c as_backup.c \
 	  fd_plugins.c accurate.c \
 	  filed_conf.c heartbeat.c job.c \
 	  restore.c status.c verify.c verify_vol.c xattr.c

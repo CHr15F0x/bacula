@@ -66,14 +66,18 @@ extern void  print_memory_pool_stats();
 
 extern void garbage_collect_memory();
 
-
 #define PM_NOPOOL  0                  /* nonpooled memory */
 #define PM_NAME    1                  /* Bacula name */
 #define PM_FNAME   2                  /* file name buffer */
 #define PM_MESSAGE 3                  /* daemon message */
 #define PM_EMSG    4                  /* error message */
 #define PM_BSOCK   5                  /* BSOCK buffer */
+#if AS_BACKUP
+#define PM_AS_BSOCK_PROXY 6           /* AS_BSOCK_PROXY buffer */
+#define PM_MAX     PM_AS_BSOCK_PROXY  /* Number of types */
+#else
 #define PM_MAX     PM_BSOCK           /* Number of types */
+#endif /* !AS_BACKUP */
 
 class POOL_MEM {
    char *mem;
