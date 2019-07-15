@@ -14,6 +14,15 @@ struct JCR;
 // or buffers which can be consumed by the consumer thread
 //
 
+
+#define H(x) (int)((unsigned char)( \
+      ((unsigned long)x >> 0) ^ ((unsigned long)x >> 1) ^ \
+      ((unsigned long)x >> 2) ^ ((unsigned long)x >> 3) ^ \
+      ((unsigned long)x >> 4) ^ ((unsigned long)x >> 5) ^ \
+      ((unsigned long)x >> 6) ^ ((unsigned long)x >> 7)))
+
+
+
 int my_thread_id();
 int thread_id(pthread_t pth_id);
 

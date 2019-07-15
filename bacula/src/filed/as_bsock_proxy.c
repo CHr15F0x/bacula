@@ -18,26 +18,26 @@ AS_BSOCK_PROXY::AS_BSOCK_PROXY()
 void AS_BSOCK_PROXY::init()
 {
    memset(this, 0, sizeof(AS_BSOCK_PROXY));
-   msg = get_pool_memory(PM_BSOCK);
+   msg = get_pool_memory(PM_AS_BSOCK_PROXY);
 
    pthread_mutex_lock(&proxy_cnt_lock);
    id = proxy_cnt + SOCK_BASE;
    ++proxy_cnt;
    pthread_mutex_unlock(&proxy_cnt_lock);
 
-   Pmsg2(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::init() this: %p\n", my_thread_id(), id);
+   Pmsg2(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::init()\n", my_thread_id(), id);
 }
 
 bool AS_BSOCK_PROXY::send()
 {
-   Pmsg3(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::send() %d\n", my_thread_id(), id, msglen);
+   Pmsg4(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::send() msglen: %4d msg: %4d\n", my_thread_id(), id, msglen, H(msg));
 
    /* New file to be sent */
    if (as_buf == NULL)
    {
       as_buf = as_acquire_buffer(NULL);
 
-      Pmsg2(50, "\t\t>>>> %4d 1 as_buf: %p\n", my_thread_id(), as_buf);
+//      Pmsg2(50, "\t\t>>>> %4d 1 as_buf: %p\n", my_thread_id(), as_buf);
       ASSERT(as_buf != NULL);
       ASSERT(as_buf->size == 0);
    }
@@ -50,7 +50,7 @@ bool AS_BSOCK_PROXY::send()
       /* Get a new one which is already marked */
       as_buf = as_acquire_buffer(this);
 
-      Pmsg2(50, "\t\t>>>> %4d 1 as_buf: %p\n", my_thread_id(), as_buf);
+//      Pmsg2(50, "\t\t>>>> %4d 1 as_buf: %p\n", my_thread_id(), as_buf);
 
       ASSERT(as_buf != NULL);
       ASSERT(as_buf->size == 0);
@@ -103,8 +103,6 @@ bool AS_BSOCK_PROXY::send()
  */
 bool AS_BSOCK_PROXY::fsend(const char *fmt, ...)
 {
-   Pmsg3(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::fsend() %s\n", my_thread_id(), id, fmt);
-
    va_list arg_ptr;
    int maxlen;
 
@@ -118,6 +116,9 @@ bool AS_BSOCK_PROXY::fsend(const char *fmt, ...)
       }
       msg = realloc_pool_memory(msg, maxlen + maxlen / 2);
    }
+
+   Pmsg3(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::fsend() \"%s\"\n", my_thread_id(), id, msg);
+
    return send();
 }
 
@@ -131,18 +132,21 @@ bool AS_BSOCK_PROXY::signal(int signal)
 
 void AS_BSOCK_PROXY::finalize()
 {
-   Pmsg3(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::finalize() %p\n", my_thread_id(), id, as_buf);
-
    if (as_buf)
    {
+      Pmsg3(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::finalize() as_buf: %4d\n", my_thread_id(), id, as_buf->id);
       as_consumer_enqueue_buffer(as_buf, true);
       as_buf = NULL;
+   }
+   else
+   {
+      Pmsg2(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::finalize() null\n", my_thread_id(), id);
    }
 }
 
 void AS_BSOCK_PROXY::cleanup()
 {
-   Pmsg3(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::cleanup() %p\n", my_thread_id(), id, msg);
+   Pmsg4(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::cleanup() msglen: %4d, msg: %4d\n", my_thread_id(), id, msglen, H(msg));
 
    // TODO VERY IMPORTANT
    finalize();

@@ -66,6 +66,8 @@ extern void  print_memory_pool_stats();
 
 extern void garbage_collect_memory();
 
+#define AS_BACKUP 1
+
 #define PM_NOPOOL  0                  /* nonpooled memory */
 #define PM_NAME    1                  /* Bacula name */
 #define PM_FNAME   2                  /* file name buffer */

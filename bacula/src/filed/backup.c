@@ -62,18 +62,18 @@ static void crypto_session_end(JCR *jcr);
 
 #if AS_BACKUP
 #warning "\
-ASYNC    ASYNC    ASYNC    ASYNC    ASYNC\
-ASYNC    ASYNC    ASYNC    ASYNC    ASYNC\
-ASYNC    ASYNC    ASYNC    ASYNC    ASYNC\
-ASYNC    ASYNC    ASYNC    ASYNC    ASYNC\
+ASYNC    ASYNC    ASYNC    ASYNC    ASYNC\n\
+ASYNC    ASYNC    ASYNC    ASYNC    ASYNC\n\
+ASYNC    ASYNC    ASYNC    ASYNC    ASYNC\n\
+ASYNC    ASYNC    ASYNC    ASYNC    ASYNC\n\
 "
 static bool crypto_session_send(JCR *jcr, AS_BSOCK_PROXY *sd);
 #else
 #warning "\
-SYNC     SYNC     SYNC     SYNC     SYNC\
-SYNC     SYNC     SYNC     SYNC     SYNC\
-SYNC     SYNC     SYNC     SYNC     SYNC\
-SYNC     SYNC     SYNC     SYNC     SYNC\
+SYNC     SYNC     SYNC     SYNC     SYNC\n\
+SYNC     SYNC     SYNC     SYNC     SYNC\n\
+SYNC     SYNC     SYNC     SYNC     SYNC\n\
+SYNC     SYNC     SYNC     SYNC     SYNC\n\
 "
 static bool crypto_session_send(JCR *jcr, BSOCK *sd);
 #endif
@@ -100,6 +100,9 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
    // TODO landonf: Allow user to specify encryption algorithm
 
    sd = jcr->store_bsock;
+
+   Pmsg5(50, "\t\t\t>>>> %4d blast_data_to_storage_daemon() sock: %p msg: %p msglen: %d sizeof: %d\n",
+      my_thread_id(), sd, sd->msg, sd->msglen, sizeof_pool_memory(sd->msg));
 
    jcr->setJobStatus(JS_Running);
 
@@ -202,6 +205,10 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
    }
 
 
+   Pmsg5(50, "\t\t\t>>>> %4d BEFORE as_init() sock: %p msg: %p msglen: %d sizeof: %d\n",
+      my_thread_id(), sd, sd->msg, sd->msglen, sizeof_pool_memory(sd->msg));
+
+
    // Takes ownership of sd socket
    as_init(sd);
 
@@ -221,6 +228,20 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
    // Releases ownership of sd socket
    as_shutdown();
 
+   // TODO ????
+   // TODO ????
+   // TODO ????
+   // TODO !!!! dlaczego trzeba alokować ten bufor ponownie o co chodzi !!!!
+   // TODO !!!! dlaczego trzeba alokować ten bufor ponownie o co chodzi !!!!
+   // TODO !!!! dlaczego trzeba alokować ten bufor ponownie o co chodzi !!!!
+   // TODO ????
+   // TODO ????
+   // TODO ????
+   sd->msg = get_pool_memory(PM_BSOCK);
+
+
+   Pmsg5(50, "\t\t\t>>>> %4d AFTER as_shutdown() sock: %p msg: %p msglen: %d sizeof: %d\n",
+      my_thread_id(), sd, sd->msg, sd->msglen, sizeof_pool_memory(sd->msg));
 
    if (have_acl && jcr->acl_data->u.build->nr_errors > 0) {
       Jmsg(jcr, M_WARNING, 0, _("Encountered %ld acl errors while doing backup\n"),
@@ -236,6 +257,10 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
    accurate_finish(jcr);              /* send deleted or base file list to SD */
 
    stop_heartbeat_monitor(jcr);
+
+   Pmsg5(50, "\t\t\t>>>> %4d BEFORE last signal, sock: %p msg: %p msglen: %d sizeof: %d\n",
+      my_thread_id(), sd, sd->msg, sd->msglen, sizeof_pool_memory(sd->msg));
+
 
    sd->signal(BNET_EOD);            /* end of sending data */
 

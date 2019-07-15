@@ -7,13 +7,13 @@
 
 #include "../findlib/find.h"
 
+
+#include "as_bsock_proxy.h"
+
+
 int my_thread_id()
 {
-   pthread_t id = pthread_self();
-
-   return (unsigned char)(
-      (id >> 0) ^ (id >> 1) ^ (id >> 2) ^ (id >> 3) ^
-      (id >> 4) ^ (id >> 5) ^ (id >> 6) ^ (id >> 7));
+   return H(pthread_self());
 }
 
 
@@ -76,8 +76,17 @@ static BQUEUE as_free_buffer_queue =
 
 as_buffer_t *as_acquire_buffer(AS_BSOCK_PROXY *parent)
 {
-   Pmsg4(50, "\t\t>>>> %4d as_acquire_buffer() parent: %p, workq->quit: %d, free buffers: %d\n",
-      my_thread_id(), parent, as_workqueue_engine_quit(), qsize(&as_free_buffer_queue));
+   if (parent)
+   {
+      Pmsg4(50, "\t\t>>>> %4d as_acquire_buffer() BEGIN parent: %4d, cons.q.size: %d, free size: %d \n",
+         my_thread_id(), parent->id, qsize(&as_consumer_buffer_queue), qsize(&as_free_buffer_queue));
+   }
+   else
+   {
+      Pmsg3(50, "\t\t>>>> %4d as_acquire_buffer() BEGIN parent: null, cons.q.size: %d, free size: %d \n",
+         my_thread_id(), qsize(&as_consumer_buffer_queue), qsize(&as_free_buffer_queue));
+   }
+
 
    as_buffer_t *buffer = NULL;
 
@@ -94,8 +103,16 @@ as_buffer_t *as_acquire_buffer(AS_BSOCK_PROXY *parent)
          buffer->parent = parent;
          buffer->size = 0;
 
-         Pmsg4(50, "\t\t>>>> %4d as_acquire_buffer() parent: %p, buffer: %d, free buffers: %d\n",
-            my_thread_id(), parent, buffer->id, qsize(&as_free_buffer_queue));
+         if (parent)
+         {
+            Pmsg4(50, "\t\t>>>> %4d as_acquire_buffer() END parent: %4d, cons.q.size: %d, free size: %d \n",
+               my_thread_id(), parent->id, qsize(&as_consumer_buffer_queue), qsize(&as_free_buffer_queue));
+         }
+         else
+         {
+            Pmsg3(50, "\t\t>>>> %4d as_acquire_buffer() END parent: null, cons.q.size: %d, free size: %d \n",
+               my_thread_id(), qsize(&as_consumer_buffer_queue), qsize(&as_free_buffer_queue));
+         }
          break;
       }
    }
@@ -111,21 +128,46 @@ void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
 	{
 	   as_bigfile_bsock_proxy = buffer->parent;
 
-	   Pmsg3(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d, NEW bigfile: %X\n",
-         my_thread_id(), buffer->id, as_bigfile_bsock_proxy);
+	   if (as_bigfile_bsock_proxy)
+	   {
+	      Pmsg5(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d, NEW bigfile: %4d, cons.q.size: %d, free size: %d\n",
+	         my_thread_id(), buffer->id, as_bigfile_bsock_proxy->id, qsize(&as_consumer_buffer_queue), qsize(&as_free_buffer_queue));
+	   }
+	   else
+	   {
+         Pmsg4(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d, NEW bigfile: null, cons.q.size: %d, free size: %d\n",
+            my_thread_id(), buffer->id, qsize(&as_consumer_buffer_queue), qsize(&as_free_buffer_queue));
+	   }
+
 	   QINSERT(&as_consumer_buffer_queue, &buffer->bq);
 	}
 	else if (as_bigfile_bsock_proxy == buffer->parent)
 	{
       if (finalize)
       {
-         Pmsg3(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d, LAST bigfile: %X\n",
-            my_thread_id(), buffer->id, as_bigfile_bsock_proxy);
+         if (as_bigfile_bsock_proxy)
+         {
+            Pmsg5(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d, LAST bigfile: %4d, cons.q.size: %d, free size: %d\n",
+               my_thread_id(), buffer->id, as_bigfile_bsock_proxy->id, qsize(&as_consumer_buffer_queue), qsize(&as_free_buffer_queue));
+         }
+         else
+         {
+            Pmsg4(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d, LAST bigfile: null, cons.q.size: %d, free size: %d\n",
+               my_thread_id(), buffer->id, qsize(&as_consumer_buffer_queue), qsize(&as_free_buffer_queue));
+         }
       }
       else
       {
-         Pmsg3(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d, CONT bigfile: %X\n",
-            my_thread_id(), buffer->id, as_bigfile_bsock_proxy);
+         if (as_bigfile_bsock_proxy)
+         {
+            Pmsg5(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d, CONT bigfile: %4d, cons.q.size: %d, free size: %d\n",
+               my_thread_id(), buffer->id, as_bigfile_bsock_proxy->id, qsize(&as_consumer_buffer_queue), qsize(&as_free_buffer_queue));
+         }
+         else
+         {
+            Pmsg4(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d, CONT bigfile: null, cons.q.size: %d, free size: %d\n",
+               my_thread_id(), buffer->id, qsize(&as_consumer_buffer_queue), qsize(&as_free_buffer_queue));
+         }
       }
       // TODO continue this big file
 	   // Find the last buffer in the queue which refers to this file
@@ -154,9 +196,18 @@ void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
 	}
 	else // as_bigfile_bsock_proxy != buffer->parent
 	{
-      Pmsg3(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d, BLOCKED bigfile: %X\n",
-         my_thread_id(), buffer->id, as_bigfile_bsock_proxy);
-      QINSERT(&as_consumer_buffer_queue, &buffer->bq);
+	   if (as_bigfile_bsock_proxy)
+	   {
+	      Pmsg5(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d, BLOCKED bigfile: %4d, cons.q.size: %d, free size: %d\n",
+	         my_thread_id(), buffer->id, as_bigfile_bsock_proxy->id, qsize(&as_consumer_buffer_queue), qsize(&as_free_buffer_queue));
+	   }
+	   else
+	   {
+	      Pmsg4(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d, BLOCKED bigfile: null, cons.q.size: %d, free size: %d\n",
+	         my_thread_id(), buffer->id, qsize(&as_consumer_buffer_queue), qsize(&as_free_buffer_queue));
+	   }
+
+	   QINSERT(&as_consumer_buffer_queue, &buffer->bq);
 	}
 
 	pthread_mutex_unlock(&as_buffer_lock);
@@ -328,7 +379,9 @@ bool as_quit_consumer_thread_loop()
    pthread_mutex_lock(&as_consumer_thread_lock);
    quit = as_consumer_thread_quit;
    pthread_mutex_unlock(&as_consumer_thread_lock);
-   return quit;
+
+   /* Only quit loop if quit requested and all data sent to socket */
+   return quit && (qsize(&as_consumer_buffer_queue) == 0);
 }
 
 as_buffer_t *as_consumer_dequeue_buffer()
@@ -341,8 +394,8 @@ as_buffer_t *as_consumer_dequeue_buffer()
 
    if (buffer)
    {
-      Pmsg3(50, "\t\t>>>> %4d as_consumer_dequeue_buffer() %d, consumer queue size: %d\n",
-         my_thread_id(), buffer->id, qsize(&as_consumer_buffer_queue));
+      Pmsg4(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d, cons.q.size: %d, free size: %d\n",
+         my_thread_id(), buffer->id, qsize(&as_consumer_buffer_queue), qsize(&as_free_buffer_queue));
    }
 
    return buffer;
@@ -357,8 +410,8 @@ void as_release_buffer(as_buffer_t *buffer)
 
    QINSERT(&as_free_buffer_queue, &buffer->bq);
 
-   Pmsg3(50, "\t\t>>>> %4d as_release_buffer() %d, consumer queue size: %d\n",
-      my_thread_id(), buffer->id, qsize(&as_free_buffer_queue));
+   Pmsg4(50, "\t\t>>>> %4d as_release_buffer() %d, cons.q.size: %d, free size: %d \n",
+      my_thread_id(), buffer->id, qsize(&as_consumer_buffer_queue), qsize(&as_free_buffer_queue));
 
    pthread_mutex_unlock(&as_buffer_lock);
 }
@@ -386,7 +439,7 @@ void *as_consumer_thread_loop(void *arg)
 
       int pos_in_buffer = 0;
 
-      Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() buf: %d, tosend: %d, pos: %d, bufsize: %d, qsize: %d\n",
+      Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() buf: %4d, tosend: %4d, pos: %4d, bufsize: %4d, cons.q.size: %4d\n",
          my_thread_id(), buffer->id, to_send, pos_in_buffer, buffer->size, qsize(&as_consumer_buffer_queue));
 
       while (pos_in_buffer < buffer->size)
@@ -396,13 +449,13 @@ void *as_consumer_thread_loop(void *arg)
             memcpy(&to_send, &buffer->data[pos_in_buffer], sizeof(to_send));
             pos_in_buffer += sizeof(to_send);
 
-            Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() buf: %d, tosend: %d, pos: %d, bufsize: %d, qsize: %d\n",
+            Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() buf: %4d, tosend: %4d, pos: %4d, bufsize: %4d, cons.q.size: %4d\n",
                my_thread_id(), buffer->id, to_send, pos_in_buffer, buffer->size, qsize(&as_consumer_buffer_queue));
          }
 
          if (pos_in_buffer + to_send > buffer->size)
          {
-            Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() buf: %d, tosend: %d, pos: %d, bufsize: %d, qsize: %d\n",
+            Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() buf: %4d, tosend: %4d, pos: %4d, bufsize: %4d, cons.q.size: %4d\n",
                my_thread_id(), buffer->id, to_send, pos_in_buffer, buffer->size, qsize(&as_consumer_buffer_queue));
 
             sd->msg = &buffer->data[pos_in_buffer];
@@ -416,7 +469,7 @@ void *as_consumer_thread_loop(void *arg)
 
          if (to_send < 0) // signal
          {
-            Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() buf: %d, tosend: %d, pos: %d, bufsize: %d, qsize: %d\n",
+            Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() buf: %4d, tosend: %4d, pos: %4d, bufsize: %4d, cons.q.size: %4d\n",
                my_thread_id(), buffer->id, to_send, pos_in_buffer, buffer->size, qsize(&as_consumer_buffer_queue));
 
             sd->signal(to_send);
@@ -424,7 +477,7 @@ void *as_consumer_thread_loop(void *arg)
          }
          else
          {
-            Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() buf: %d, tosend: %d, pos: %d, bufsize: %d, qsize: %d\n",
+            Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() buf: %4d, tosend: %4d, pos: %4d, bufsize: %4d, cons.q.size: %4d\n",
                my_thread_id(), buffer->id, to_send, pos_in_buffer, buffer->size, qsize(&as_consumer_buffer_queue));
 
             sd->msg = &buffer->data[pos_in_buffer];
@@ -472,8 +525,8 @@ void as_init_consumer_thread(BSOCK *sd)
 
 	pthread_create(&as_consumer_thread, NULL, as_consumer_thread_loop, (void *)sd);
 
-   Pmsg3(50, "\t\t>>>> %4d as_init_consumer_thread() id: %X sock: %p\n",
-      my_thread_id(), as_consumer_thread, sd);
+   Pmsg3(50, "\t\t>>>> %4d as_init_consumer_thread() id: %4d sock: %p\n",
+      my_thread_id(), H(as_consumer_thread), sd);
 }
 
 void as_workqueue_init()
@@ -524,12 +577,12 @@ void as_release_remaining_consumer_buffers()
 		buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
 		if (buffer != NULL)
 		{
-		   Pmsg2(50, "\t\t>>>> %4d as_release_remaining_consumer_buffers() buffer: %d\n", my_thread_id(), buffer->id);
+		   Pmsg2(50, "\t\t>>>> %4d as_release_remaining_consumer_buffers() buffer: %4d\n", my_thread_id(), buffer->id);
 			QINSERT(&as_free_buffer_queue, &buffer->bq);
 		}
 	} while (buffer != NULL);
 
-	Pmsg3(50, "\t\t>>>> %4d as_release_remaining_consumer_buffers() END, consumer queue size %d, free queue size %d\n",
+	Pmsg3(50, "\t\t>>>> %4d as_release_remaining_consumer_buffers() END, cons.q.size %4d, free size %4d\n",
       my_thread_id(), qsize(&as_consumer_buffer_queue), qsize(&as_free_buffer_queue));
 
 	pthread_mutex_unlock(&as_buffer_lock);
@@ -539,7 +592,7 @@ void as_release_remaining_consumer_buffers()
 
 void as_clear_free_buffers_queue()
 {
-   Pmsg2(50, "\t\t>>>> %4d as_clear_free_buffers_queue() BEGIN, size %d\n",
+   Pmsg2(50, "\t\t>>>> %4d as_clear_free_buffers_queue() BEGIN, size %4d\n",
       my_thread_id(), qsize(&as_free_buffer_queue));
    ASSERT(AS_BUFFERS == qsize(&as_free_buffer_queue));
 
@@ -557,7 +610,7 @@ void as_clear_free_buffers_queue()
       }
    } while (buffer != NULL);
 
-   Pmsg2(50, "\t\t>>>> %4d as_clear_free_buffers_queue() END, size %d\n",
+   Pmsg2(50, "\t\t>>>> %4d as_clear_free_buffers_queue() END, size %4d\n",
       my_thread_id(), qsize(&as_free_buffer_queue));
 
    ASSERT(0 == qsize(&as_free_buffer_queue));
