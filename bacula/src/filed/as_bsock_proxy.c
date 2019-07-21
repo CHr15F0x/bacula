@@ -20,6 +20,8 @@ void AS_BSOCK_PROXY::init()
    memset(this, 0, sizeof(AS_BSOCK_PROXY));
    msg = get_pool_memory(PM_AS_BSOCK_PROXY);
 
+   msg = realloc_pool_memory(msg, (int32_t)as_get_initial_bsock_proxy_buf_size());
+
    pthread_mutex_lock(&proxy_cnt_lock);
    id = proxy_cnt + SOCK_BASE;
    ++proxy_cnt;

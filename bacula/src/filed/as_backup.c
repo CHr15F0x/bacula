@@ -536,13 +536,26 @@ void as_workqueue_init()
    workq_init(&as_work_queue, AS_PRODUCER_THREADS, as_workqueue_engine);
 }
 
-void as_init(BSOCK *sd)
+
+static POOLMEM *as_save_msg_pointer = NULL;
+static uint32_t as_initial_buf_size = 0;
+
+void as_init(BSOCK *sd, uint32_t buf_size)
 {
    Pmsg2(50, "\t\t>>>> %4d as_init() sock: %p\n", my_thread_id(), sd);
+
+   // Store the pointer to the poolmem
+   as_save_msg_pointer = sd->msg;
+   as_initial_buf_size = buf_size;
 
 	as_init_free_buffers_queue();
 	as_init_consumer_thread(sd);
 	as_workqueue_init();
+}
+
+uint32_t as_get_initial_bsock_proxy_buf_size()
+{
+   return as_initial_buf_size;
 }
 
 //
@@ -624,7 +637,7 @@ void as_workqueue_destroy()
    workq_destroy(&as_work_queue);
 }
 
-void as_shutdown()
+void as_shutdown(BSOCK *sd)
 {
    Pmsg1(50, "\t\t>>>> %4d as_shutdown() BEGIN\n", my_thread_id());
 
@@ -635,6 +648,9 @@ void as_shutdown()
    as_release_remaining_consumer_buffers();
 
    as_clear_free_buffers_queue();
+
+   // Restore the pointer to the poolmem
+   sd->msg = as_save_msg_pointer;
 
    Pmsg1(50, "\t\t>>>> %4d as_shutdown() END\n", my_thread_id());
 }

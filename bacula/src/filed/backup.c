@@ -101,8 +101,11 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
 
    sd = jcr->store_bsock;
 
-   Pmsg5(50, "\t\t\t>>>> %4d blast_data_to_storage_daemon() sock: %p msg: %p msglen: %d sizeof: %d\n",
-      my_thread_id(), sd, sd->msg, sd->msglen, sizeof_pool_memory(sd->msg));
+//   Pmsg5(50, "\t\t\t>>>> %4d blast_data_to_storage_daemon() sock: %p msg: %p msglen: %d sizeof: %d\n",
+//      my_thread_id(), sd, sd->msg, sd->msglen, sizeof_pool_memory(sd->msg));
+
+   Pmsg4(50, "\t\t\t>>>> %4d blast_data_to_storage_daemon() sock: %p msg: %p msglen: %d\n",
+      my_thread_id(), sd, sd->msg, sd->msglen);
 
    jcr->setJobStatus(JS_Running);
 
@@ -124,6 +127,9 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
    }
 
    jcr->buf_size = sd->msglen;
+
+   uint32_t as_bsock_proxy_initial_buf_len = sd->msglen;
+
    /**
     * Adjust for compression so that output buffer is
     *  12 bytes + 0.1% larger than input buffer plus 18 bytes.
@@ -205,12 +211,24 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
    }
 
 
-   Pmsg5(50, "\t\t\t>>>> %4d BEFORE as_init() sock: %p msg: %p msglen: %d sizeof: %d\n",
-      my_thread_id(), sd, sd->msg, sd->msglen, sizeof_pool_memory(sd->msg));
+   //Pmsg5(50, "\t\t\t>>>> %4d BEFORE as_init() sock: %p msg: %p msglen: %d sizeof: %d\n",
+   //   my_thread_id(), sd, sd->msg, sd->msglen, sizeof_pool_memory(sd->msg));
+
+   Pmsg4(50, "\t\t\t>>>> %4d BEFORE as_init() sock: %p msg: %p msglen: %d\n",
+      my_thread_id(), sd, sd->msg, sd->msglen);
+
+   // job thread may still be send()ing data while as_init() may trigger yet another send
+   // Czy to jest potrzebne???
+   // sm_check(__FILE__, __LINE__, true);
+
+   sd->set_locking();
+
+
 
 
    // Takes ownership of sd socket
-   as_init(sd);
+   // To samo dla naszych socketów !!!
+   as_init(sd, as_bsock_proxy_initial_buf_len);
 
 
 
@@ -226,22 +244,18 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
 
 
    // Releases ownership of sd socket
-   as_shutdown();
+   as_shutdown(sd);
 
-   // TODO ????
-   // TODO ????
-   // TODO ????
-   // TODO !!!! dlaczego trzeba alokować ten bufor ponownie o co chodzi !!!!
-   // TODO !!!! dlaczego trzeba alokować ten bufor ponownie o co chodzi !!!!
-   // TODO !!!! dlaczego trzeba alokować ten bufor ponownie o co chodzi !!!!
-   // TODO ????
-   // TODO ????
-   // TODO ????
-   sd->msg = get_pool_memory(PM_BSOCK);
+   // sm_check(__FILE__, __LINE__, true);
 
+   // Czy to jest potrzebne??
+   sd->clear_locking();
 
-   Pmsg5(50, "\t\t\t>>>> %4d AFTER as_shutdown() sock: %p msg: %p msglen: %d sizeof: %d\n",
-      my_thread_id(), sd, sd->msg, sd->msglen, sizeof_pool_memory(sd->msg));
+   //Pmsg5(50, "\t\t\t>>>> %4d AFTER as_shutdown() sock: %p msg: %p msglen: %d sizeof: %d\n",
+   //   my_thread_id(), sd, sd->msg, sd->msglen, sizeof_pool_memory(sd->msg));
+
+   Pmsg4(50, "\t\t\t>>>> %4d AFTER as_shutdown() sock: %p msg: %p msglen: %d\n",
+      my_thread_id(), sd, sd->msg, sd->msglen);
 
    if (have_acl && jcr->acl_data->u.build->nr_errors > 0) {
       Jmsg(jcr, M_WARNING, 0, _("Encountered %ld acl errors while doing backup\n"),
@@ -258,9 +272,13 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
 
    stop_heartbeat_monitor(jcr);
 
-   Pmsg5(50, "\t\t\t>>>> %4d BEFORE last signal, sock: %p msg: %p msglen: %d sizeof: %d\n",
-      my_thread_id(), sd, sd->msg, sd->msglen, sizeof_pool_memory(sd->msg));
+   //Pmsg5(50, "\t\t\t>>>> %4d BEFORE last signal, sock: %p msg: %p msglen: %d sizeof: %d\n",
+   //   my_thread_id(), sd, sd->msg, sd->msglen, sizeof_pool_memory(sd->msg));
 
+   Pmsg4(50, "\t\t\t>>>> %4d BEFORE last signal, sock: %p msg: %p msglen: %d\n",
+      my_thread_id(), sd, sd->msg, sd->msglen);
+
+   print_memory_pool_stats();
 
    sd->signal(BNET_EOD);            /* end of sending data */
 

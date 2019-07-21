@@ -128,7 +128,8 @@ void as_init_free_buffers_queue();
 void as_init_consumer_thread(BSOCK *sd);
 void as_workqueue_init();
 
-void as_init(BSOCK *sd);
+void as_init(BSOCK *sd, uint32_t buf_size);
+uint32_t as_get_initial_bsock_proxy_buf_size();
 //
 // Shutdown
 //
@@ -139,7 +140,7 @@ void as_join_consumer_thread();
 void as_release_remaining_consumer_buffers();
 void as_clear_free_buffers_queue();
 void as_workqueue_destroy();
-void as_shutdown();
+void as_shutdown(BSOCK *sd);
 
 
 #endif /* __AS_BACKUP_H */
