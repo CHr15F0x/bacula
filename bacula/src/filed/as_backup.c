@@ -63,6 +63,7 @@ static AS_BSOCK_PROXY *as_bigfile_bsock_proxy = NULL;
 // AS TODO use condition variable
 // AS TODO dwa muteksy - jeden dla buforów wolnych, drugi dla kolejki dla konsumenta
 static pthread_mutex_t as_buffer_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t as_buffer_cond = PTHREAD_COND_INITIALIZER;
 
 static BQUEUE as_free_buffer_queue =
 {
@@ -92,11 +93,10 @@ as_buffer_t *as_acquire_buffer(AS_BSOCK_PROXY *parent)
 
    /** Wait for a buffer to become available */
    // while (as_workqueue_engine_quit() == false) // cancel if job canceled
+   pthread_mutex_lock(&as_buffer_lock);
    while (1)
    {
-      pthread_mutex_lock(&as_buffer_lock);
       buffer = (as_buffer_t *)QREMOVE(&as_free_buffer_queue);
-      pthread_mutex_unlock(&as_buffer_lock);
 
       if (buffer)
       {
@@ -115,7 +115,12 @@ as_buffer_t *as_acquire_buffer(AS_BSOCK_PROXY *parent)
          }
          break;
       }
+      else
+      {
+         pthread_cond_wait(&as_buffer_cond, &as_buffer_lock); // timed wait?
+      }
    }
+   pthread_mutex_unlock(&as_buffer_lock);
 
    return buffer;
 }
@@ -414,6 +419,9 @@ void as_release_buffer(as_buffer_t *buffer)
       my_thread_id(), buffer->id, qsize(&as_consumer_buffer_queue), qsize(&as_free_buffer_queue));
 
    pthread_mutex_unlock(&as_buffer_lock);
+
+
+   pthread_cond_broadcast(&as_buffer_cond);
 }
 
 void *as_consumer_thread_loop(void *arg)
