@@ -22,10 +22,10 @@ void AS_BSOCK_PROXY::init()
 
    msg = realloc_pool_memory(msg, (int32_t)as_get_initial_bsock_proxy_buf_size());
 
-   pthread_mutex_lock(&proxy_cnt_lock);
+   P(proxy_cnt_lock);
    id = proxy_cnt + SOCK_BASE;
    ++proxy_cnt;
-   pthread_mutex_unlock(&proxy_cnt_lock);
+   V(proxy_cnt_lock);
 
    Pmsg2(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::init()\n", my_thread_id(), id);
 }

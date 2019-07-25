@@ -86,7 +86,7 @@ as_buffer_t *as_acquire_buffer(AS_BSOCK_PROXY *parent)
 
    /** Wait for a buffer to become available */
    // while (as_workqueue_engine_quit() == false) // cancel if job canceled
-   pthread_mutex_lock(&as_buffer_lock);
+   P(as_buffer_lock);
    while (1)
    {
       buffer = (as_buffer_t *)QREMOVE(&as_free_buffer_queue);
@@ -105,14 +105,14 @@ as_buffer_t *as_acquire_buffer(AS_BSOCK_PROXY *parent)
          pthread_cond_wait(&as_buffer_cond, &as_buffer_lock); // timed wait? because of while (1)
       }
    }
-   pthread_mutex_unlock(&as_buffer_lock);
+   V(as_buffer_lock);
 
    return buffer;
 }
 
 void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
 {
-	pthread_mutex_lock(&as_consumer_queue_lock);
+	P(as_consumer_queue_lock);
 
 	if (as_bigfile_bsock_proxy == NULL)
 	{
@@ -165,7 +165,7 @@ void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
 	   QINSERT(&as_consumer_buffer_queue, &buffer->bq);
 	}
 
-	pthread_mutex_unlock(&as_consumer_queue_lock);
+	V(as_consumer_queue_lock);
 
 	pthread_cond_signal(&as_consumer_queue_cond);
 }
@@ -335,13 +335,13 @@ bool as_quit_consumer_thread_loop()
    bool quit = false;
    int size = 0;
 
-   pthread_mutex_lock(&as_consumer_thread_lock);
+   P(as_consumer_thread_lock);
    quit = as_consumer_thread_quit;
-   pthread_mutex_unlock(&as_consumer_thread_lock);
+   V(as_consumer_thread_lock);
 
-   pthread_mutex_lock(&as_consumer_queue_lock);
+   P(as_consumer_queue_lock);
    size = qsize(&as_consumer_buffer_queue);
-   pthread_mutex_unlock(&as_consumer_queue_lock);
+   V(as_consumer_queue_lock);
 
    /* Only quit loop if quit requested and all data sent to socket */
    return quit && (size == 0);
@@ -351,20 +351,20 @@ as_buffer_t *as_consumer_dequeue_buffer()
 {
    as_buffer_t *buffer = NULL;
 
-   pthread_mutex_lock(&as_consumer_queue_lock);
+   P(as_consumer_queue_lock);
    buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
 
    Pmsg3(50, "\t\t>>>> %4d as_consumer_dequeue_buffer() %d, cons.q.size: %d\n",
       my_thread_id(), buffer ? buffer->id : -1, qsize(&as_consumer_buffer_queue));
 
-   pthread_mutex_unlock(&as_consumer_queue_lock);
+   V(as_consumer_queue_lock);
 
    return buffer;
 }
 
 void as_release_buffer(as_buffer_t *buffer)
 {
-   pthread_mutex_lock(&as_buffer_lock);
+   P(as_buffer_lock);
 
    buffer->size = 0; // Not really needed
    buffer->parent = NULL; // Not really needed
@@ -374,7 +374,7 @@ void as_release_buffer(as_buffer_t *buffer)
    Pmsg3(50, "\t\t>>>> %4d as_release_buffer() %d, free size: %d \n",
       my_thread_id(), buffer->id, qsize(&as_free_buffer_queue));
 
-   pthread_mutex_unlock(&as_buffer_lock);
+   V(as_buffer_lock);
 
 
    pthread_cond_broadcast(&as_buffer_cond);
@@ -402,7 +402,7 @@ void *as_consumer_thread_loop(void *arg)
     	  continue;
       }
 #else
-      pthread_mutex_lock(&as_consumer_queue_lock);
+      P(as_consumer_queue_lock);
       while (1)
       {
          buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
@@ -415,7 +415,7 @@ void *as_consumer_thread_loop(void *arg)
             pthread_cond_wait(&as_consumer_queue_cond, &as_consumer_queue_lock);
          }
       }
-      pthread_mutex_unlock(&as_consumer_queue_lock);
+      V(as_consumer_queue_lock);
 #endif
 
 
@@ -550,9 +550,9 @@ void as_request_consumer_thread_quit()
 {
    Pmsg1(50, "\t\t>>>> %4d as_request_consumer_thread_quit()\n", my_thread_id());
 
-   pthread_mutex_lock(&as_consumer_thread_lock);
+   P(as_consumer_thread_lock);
    as_consumer_thread_quit = true;
-   pthread_mutex_unlock(&as_consumer_thread_lock);
+   V(as_consumer_thread_lock);
 }
 
 void as_join_consumer_thread()
@@ -570,17 +570,17 @@ void as_release_remaining_consumer_buffers()
 
 	do
 	{
-	   pthread_mutex_lock(&as_consumer_queue_lock);
+	   P(as_consumer_queue_lock);
 	   buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
-	   pthread_mutex_unlock(&as_consumer_queue_lock);
+	   V(as_consumer_queue_lock);
 
 	   if (buffer != NULL)
 		{
 		   Pmsg2(50, "\t\t>>>> %4d as_release_remaining_consumer_buffers() buffer: %4d\n", my_thread_id(), buffer->id);
 
-		   pthread_mutex_lock(&as_buffer_lock);
+		   P(as_buffer_lock);
 		   QINSERT(&as_free_buffer_queue, &buffer->bq);
-	      pthread_mutex_unlock(&as_buffer_lock);
+	      V(as_buffer_lock);
 		}
 	} while (buffer != NULL);
 
