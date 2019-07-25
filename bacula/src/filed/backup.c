@@ -81,6 +81,15 @@ static void close_vss_backup_session(JCR *jcr);
 
 
 
+
+
+
+
+
+
+
+
+
 /**
  * Find all the requested files and send them
  * to the Storage daemon.

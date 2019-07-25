@@ -1,5 +1,4 @@
 #include "bacula.h"
-#include "jcr.h"
 #include "as_bsock_proxy.h"
 
 

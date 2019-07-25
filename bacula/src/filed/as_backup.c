@@ -245,7 +245,93 @@ struct FF_PKT {
 };
 #endif
 
+
+#if 1
+#define STRDUP(X)	if (orig_ff_pkt->X) ff_pkt->X = bstrdup(orig_ff_pkt->X)
+#define STRFREE(X)	if (ff_pkt->X) free(ff_pkt->X)
+#define POOLMEMDUP(X) if (orig_ff_pkt->X) \
+{ \
+	ff_pkt->X = get_pool_memory(PM_FNAME); \
+	int32_t orig_size = sizeof_pool_memory(orig_ff_pkt->X); \
+	if (orig_size != sizeof_pool_memory(ff_pkt->X)) \
+	{ \
+		ff_pkt->X = realloc_pool_memory(ff_pkt->X, orig_size); \
+	} \
+}
+#define POOLMEMFREE(X) if (ff_pkt->X) free_pool_memory(ff_pkt->X)
+
+
 // TODO skopiowaÄ‡ tylko te atrybuty ktÃ³re sÄ… uÅ¼ywane w as_save_file i woÅ‚anych w
+// niej funkcjach
+FF_PKT *as_new_ff_pkt_clone(FF_PKT *orig_ff_pkt)
+{
+   FF_PKT *ff_pkt = (FF_PKT *)bmalloc(sizeof(FF_PKT));
+   memcpy(ff_pkt, orig_ff_pkt, sizeof(FF_PKT));
+
+#if 0
+   struct s_included_file *included_files_list; /* KLIS TODO check */
+   struct s_excluded_file *excluded_files_list; /* KLIS TODO check */
+   struct s_excluded_file *excluded_paths_list; /* KLIS TODO check */
+   findFILESET *fileset; /* KLIS TODO check */
+   /* List of all hard linked files found */
+   /* KLIS TODO not that trivial */
+   struct f_link **linkhash;          /* hard linked files */
+#endif
+
+   STRDUP(top_fname);
+   STRDUP(fname);
+   STRDUP(link);
+   STRDUP(object_name);
+   STRDUP(object);
+   STRDUP(plugin);
+   POOLMEMDUP(sys_fname);
+   POOLMEMDUP(fname_save);
+   POOLMEMDUP(link_save);
+   POOLMEMDUP(ignoredir_fname);
+   STRDUP(digest);
+
+   /* TODO wtf z tymi memberami */
+   ff_pkt->included_files_list = NULL;
+   ff_pkt->excluded_files_list = NULL;
+   ff_pkt->excluded_paths_list = NULL;
+   ff_pkt->fileset = NULL;
+   ff_pkt->linkhash = NULL;
+
+   //ff_pkt->fname_save = NULL;
+   //ff_pkt->link_save = NULL;
+   //ff_pkt->ignoredir_fname = NULL;
+
+
+   return ff_pkt;
+}
+
+void as_free_ff_pkt_clone(FF_PKT *ff_pkt)
+{
+	/* Smartalloc treats freeing NULL with warning */
+	STRFREE(top_fname);
+	STRFREE(fname);
+	STRFREE(link);
+	STRFREE(object_name);
+	STRFREE(object);
+	STRFREE(plugin);
+	POOLMEMFREE(sys_fname);
+	POOLMEMFREE(fname_save);
+	POOLMEMFREE(link_save);
+	POOLMEMFREE(ignoredir_fname);
+	STRFREE(digest);
+
+	free(ff_pkt);
+}
+
+#undef STRDUP
+#undef STRFREE
+#undef POOLMEMDUP
+#undef POOLMEMFREE
+#else
+
+
+
+// TODO skopiowaæ tylko te atrybuty które s¹ u¿ywane w as_save_file i wo³anych w
 // niej funkcjach
 FF_PKT *as_new_ff_pkt_clone(FF_PKT *orig_ff_pkt)
 {
@@ -280,6 +366,29 @@ void as_free_ff_pkt_clone(FF_PKT *ff_pkt)
    }
    free(ff_pkt);
 }
+
+
+#endif
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 int as_save_file_schedule(
    JCR *jcr,
