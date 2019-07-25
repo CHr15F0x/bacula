@@ -258,7 +258,8 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
    // sm_check(__FILE__, __LINE__, true);
 
    // Czy to jest potrzebne??
-   sd->clear_locking();
+   // Moved to the start of consumer thread
+   // sd->clear_locking();
 
    //Pmsg5(50, "\t\t\t>>>> %4d AFTER as_shutdown() sock: %p msg: %p msglen: %d sizeof: %d\n",
    //   my_thread_id(), sd, sd->msg, sd->msglen, sizeof_pool_memory(sd->msg));

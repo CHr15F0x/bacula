@@ -331,7 +331,7 @@ void as_free_ff_pkt_clone(FF_PKT *ff_pkt)
 
 
 
-// TODO skopiowaæ tylko te atrybuty które s¹ u¿ywane w as_save_file i wo³anych w
+// TODO skopiowaï¿½ tylko te atrybuty ktï¿½re sï¿½ uï¿½ywane w as_save_file i woï¿½anych w
 // niej funkcjach
 FF_PKT *as_new_ff_pkt_clone(FF_PKT *orig_ff_pkt)
 {
@@ -492,6 +492,9 @@ void as_release_buffer(as_buffer_t *buffer)
 void *as_consumer_thread_loop(void *arg)
 {
    BSOCK *sd = (BSOCK *)arg;
+
+   // Socket is ours now (todo check for sure)
+   sd->clear_locking();
 
    Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() START, sock: %p\n",
       my_thread_id(), sd);
