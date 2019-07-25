@@ -767,6 +767,8 @@ bool send_plugin_name(JCR *jcr, BSOCK *sd, bool start)
 #endif
 {
    int stat;
+   JCR_LOCK_SCOPE
+   int job_files = jcr->JobFiles;
    int index = jcr->JobFiles;
    struct save_pkt *sp = (struct save_pkt *)jcr->plugin_sp;
 
@@ -779,6 +781,8 @@ bool send_plugin_name(JCR *jcr, BSOCK *sd, bool start)
       return false;
    }
 
+   JCR_UNLOCK_SCOPE
+
    if (start) {
       index++;                  /* JobFiles not incremented yet */
    }
@@ -786,6 +790,7 @@ bool send_plugin_name(JCR *jcr, BSOCK *sd, bool start)
    /* Send stream header */
    Dsm_check(999);
    if (!sd->fsend("%ld %d 0", index, STREAM_PLUGIN_NAME)) {
+      JCR_LOCK_SCOPE
      Jmsg1(jcr, M_FATAL, 0, _("Network send error to SD. ERR=%s\n"),
            sd->bstrerror());
      return false;
@@ -798,10 +803,11 @@ bool send_plugin_name(JCR *jcr, BSOCK *sd, bool start)
       stat = sd->fsend("%ld 1 %d %s%c", index, sp->portable, sp->cmd, 0);
    } else {
       /* Send end of data */
-      stat = sd->fsend("%ld 0", jcr->JobFiles);
+      stat = sd->fsend("%ld 0", job_files);
    }
    Dsm_check(999);
    if (!stat) {
+      JCR_LOCK_SCOPE
       Jmsg1(jcr, M_FATAL, 0, _("Network send error to SD. ERR=%s\n"),
             sd->bstrerror());
          return false;

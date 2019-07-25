@@ -1738,12 +1738,14 @@ static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &
 #ifdef FD_NO_SEND_TEST
    return true;
 #endif
+   int jcr_jobfiles_snapshot = 0;
 
    Dmsg1(300, "encode_and_send_attrs fname=%s\n", ff_pkt->fname);
    /** Find what data stream we will use, then encode the attributes */
    // TODO uwaga - operujemy na kopii ff_pkt
    if ((data_stream = select_data_stream(ff_pkt)) == STREAM_NONE) {
       /* This should not happen */
+      JCR_LOCK_SCOPE
       Jmsg0(jcr, M_FATAL, 0, _("Invalid file flags, no supported data stream type.\n"));
       return false;
    }
@@ -1754,6 +1756,7 @@ static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &
       attr_stream = STREAM_RESTORE_OBJECT;
    } else {
       attribsEx = attribsExBuf;
+      JCR_LOCK_SCOPE // TODO lock needed?
       attr_stream = encode_attribsEx(jcr, attribsEx, ff_pkt);
    }
 
@@ -1765,10 +1768,12 @@ static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &
    // TODO uwaga - operujemy na kopii ff_pkt
    ff_pkt->FileIndex = jcr->JobFiles;  /* return FileIndex */
    pm_strcpy(jcr->last_fname, ff_pkt->fname);
+   jcr_jobfiles_snapshot = jcr->JobFiles;
    jcr->unlock();
 
    /* Debug code: check if we must hangup */
-   if (hangup && (jcr->JobFiles > (uint32_t)hangup)) {
+   if (hangup && (jcr_jobfiles_snapshot > (uint32_t)hangup)) {
+      JCR_LOCK_SCOPE
       Jmsg1(jcr, M_FATAL, 0, "Debug hangup requested after %d files.\n", hangup);
       set_hangup(0);
       return false;
@@ -1778,7 +1783,8 @@ static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &
     * Send Attributes header to Storage daemon
     *    <file-index> <stream> <info>
     */
-   if (!sd->fsend("%ld %d 0", jcr->JobFiles, attr_stream)) {
+   if (!sd->fsend("%ld %d 0", jcr_jobfiles_snapshot, attr_stream)) {
+      JCR_LOCK_SCOPE // TODO jcr->job status is volatile but not atomic
       if (!jcr->is_canceled()) {
          Jmsg1(jcr, M_FATAL, 0, _("Network send error to SD. ERR=%s\n"),
                sd->bstrerror());
@@ -1816,8 +1822,8 @@ static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &
    switch (ff_pkt->type) {
    case FT_LNK:
    case FT_LNKSAVED:
-      Dmsg3(300, "Link %d %s to %s\n", jcr->JobFiles, ff_pkt->fname, ff_pkt->link);
-      stat = sd->fsend("%ld %d %s%c%s%c%s%c%s%c%u%c", jcr->JobFiles,
+      Dmsg3(300, "Link %d %s to %s\n", jcr_jobfiles_snapshot, ff_pkt->fname, ff_pkt->link);
+      stat = sd->fsend("%ld %d %s%c%s%c%s%c%s%c%u%c", jcr_jobfiles_snapshot,
                        ff_pkt->type, ff_pkt->fname, 0, attribs, 0,
                        ff_pkt->link, 0, attribsEx, 0, ff_pkt->delta_seq, 0);
       break;
@@ -1825,7 +1831,7 @@ static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &
    case FT_REPARSE:
    case FT_JUNCTION:
       /* Here link is the canonical filename (i.e. with trailing slash) */
-      stat = sd->fsend("%ld %d %s%c%s%c%c%s%c%u%c", jcr->JobFiles,
+      stat = sd->fsend("%ld %d %s%c%s%c%c%s%c%u%c", jcr_jobfiles_snapshot,
                        ff_pkt->type, ff_pkt->link, 0, attribs, 0, 0,
                        attribsEx, 0, ff_pkt->delta_seq, 0);
       break;
@@ -1853,7 +1859,7 @@ static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &
          Dmsg2(100, "Object compressed from %d to %d bytes\n", ff_pkt->object_len, comp_len);
       }
       sd->msglen = Mmsg(sd->msg, "%d %d %d %d %d %d %s%c%s%c",
-                        jcr->JobFiles, ff_pkt->type, ff_pkt->object_index,
+                        jcr_jobfiles_snapshot, ff_pkt->type, ff_pkt->object_index,
                         comp_len, ff_pkt->object_len, ff_pkt->object_compression,
                         ff_pkt->fname, 0, ff_pkt->object_name, 0);
       sd->msg = check_pool_memory_size(sd->msg, sd->msglen + comp_len + 2);
@@ -1867,12 +1873,12 @@ static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &
       }
       break;
    case FT_REG:
-      stat = sd->fsend("%ld %d %s%c%s%c%c%s%c%d%c", jcr->JobFiles,
+      stat = sd->fsend("%ld %d %s%c%s%c%c%s%c%d%c", jcr_jobfiles_snapshot,
                ff_pkt->type, ff_pkt->fname, 0, attribs, 0, 0, attribsEx, 0,
                ff_pkt->delta_seq, 0);
       break;
    default:
-      stat = sd->fsend("%ld %d %s%c%s%c%c%s%c%u%c", jcr->JobFiles,
+      stat = sd->fsend("%ld %d %s%c%s%c%c%s%c%u%c", jcr_jobfiles_snapshot,
                        ff_pkt->type, ff_pkt->fname, 0, attribs, 0, 0,
                        attribsEx, 0, ff_pkt->delta_seq, 0);
       break;
@@ -1884,6 +1890,7 @@ static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &
    }
 
    Dmsg2(300, ">stored: attr len=%d: %s\n", sd->msglen, sd->msg);
+   // TODO LOCK
    if (!stat && !jcr->is_job_canceled()) {
       Jmsg1(jcr, M_FATAL, 0, _("Network send error to SD. ERR=%s\n"),
             sd->bstrerror());

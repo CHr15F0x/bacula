@@ -540,4 +540,45 @@ extern void free_jcr(JCR *jcr);
 typedef void (dbg_jcr_hook_t)(JCR *jcr, FILE *fp);
 extern void dbg_jcr_add_hook(dbg_jcr_hook_t *fct);
 
+
+
+
+
+#define JCR_P  jcr->lock();
+#define JCR_V  jcr->unlock();
+#define JCR_LOCK_SCOPE JCR_LOCK_GUARD jcrl(jcr);
+#define JCR_UNLOCK_SCOPE jcrl.unlock();
+
+struct JCR_LOCK_GUARD
+{
+   JCR_LOCK_GUARD(JCR *j) :
+      jcr(j),
+      locked(true)
+   {
+      JCR_P
+   }
+
+   ~JCR_LOCK_GUARD()
+   {
+      if (locked)
+      {
+         JCR_V
+      }
+   }
+
+   void unlock()
+   {
+      if (locked)
+      {
+         locked = false;
+         JCR_V
+      }
+   }
+
+private:
+
+   JCR *jcr;
+   bool locked;
+};
+
 #endif /* __JCR_H_ */
