@@ -399,6 +399,7 @@ static bool crypto_session_send(JCR *jcr, BSOCK *sd)
 {
    POOLMEM *msgsave;
 
+   JCR_LOCK_SCOPE
    /** Send our header */
    Dmsg2(100, "Send hdr fi=%ld stream=%d\n", jcr->JobFiles, STREAM_ENCRYPTED_SESSION_DATA);
    sd->fsend("%ld %d %lld", jcr->JobFiles, STREAM_ENCRYPTED_SESSION_DATA,
@@ -407,6 +408,8 @@ static bool crypto_session_send(JCR *jcr, BSOCK *sd)
    sd->msg = jcr->crypto.pki_session_encoded;
    sd->msglen = jcr->crypto.pki_session_encoded_size;
    jcr->JobBytes += sd->msglen;
+
+   JCR_UNLOCK_SCOPE
 
    Dmsg1(100, "Send data len=%d\n", sd->msglen);
    sd->send();
@@ -819,11 +822,17 @@ int as_save_file(
          // TODO uwaga - operujemy na kopii ff_pkt
          ff_pkt->ff_errno = errno;
          berrno be;
+
+         JCR_LOCK_SCOPE
+
          Jmsg(jcr, M_NOTSAVED, 0, _("     Cannot open \"%s\": ERR=%s.\n"), ff_pkt->fname,
               be.bstrerror());
 
          // AS TODO o , tutaj muteks !
          jcr->JobErrors++;
+
+         JCR_UNLOCK_SCOPE
+
          if (tid) {
             stop_thread_timer(tid);
             tid = NULL;
@@ -869,9 +878,15 @@ int as_save_file(
                // TODO uwaga - operujemy na kopii ff_pkt
                ff_pkt->ff_errno = errno;
                berrno be;
+
+               JCR_LOCK_SCOPE
+
                Jmsg(jcr, M_NOTSAVED, -1, _("     Cannot open resource fork for \"%s\": ERR=%s.\n"),
                     ff_pkt->fname, be.bstrerror());
                jcr->JobErrors++;
+
+               JCR_UNLOCK_SCOPE
+
                if (is_bopen(&ff_pkt->bfd)) {
                   // TODO uwaga - operujemy na kopii ff_pkt
                   bclose(&ff_pkt->bfd);
@@ -901,7 +916,13 @@ int as_save_file(
          }
 
          Dmsg1(300, "Saving Finder Info for \"%s\"\n", ff_pkt->fname);
+
+         JCR_LOCK_SCOPE
+
          sd->fsend("%ld %d 0", jcr->JobFiles, STREAM_HFSPLUS_ATTRIBUTES);
+
+         JCR_UNLOCK_SCOPE
+
          Dmsg1(300, "bfiled>stored:header %s\n", sd->msg);
          pm_memcpy(sd->msg, ff_pkt->hfsinfo.fndrinfo, 32);
          sd->msglen = 32;
@@ -924,6 +945,9 @@ int as_save_file(
    // szczególnie JCR
    if (have_acl) {
       if (ff_pkt->flags & FO_ACL && ff_pkt->type != FT_LNK && !ff_pkt->cmd_plugin) {
+
+
+    	  // TODO uzyc bcosk proxy
          switch (build_acl_streams(jcr, ff_pkt)) {
          case bacl_exit_fatal:
             goto bail_out;
@@ -933,10 +957,12 @@ int as_save_file(
              * ACL_REPORT_ERR_MAX_PER_JOB print the error message set by the
              * lower level routine in jcr->errmsg.
              */
+        	 JCR_P
             if (jcr->acl_data->u.build->nr_errors < ACL_REPORT_ERR_MAX_PER_JOB) {
                Jmsg(jcr, M_WARNING, 0, "%s", jcr->errmsg);
             }
             jcr->acl_data->u.build->nr_errors++;
+            JCR_V
             break;
          case bacl_exit_ok:
             break;
@@ -951,6 +977,9 @@ int as_save_file(
    // AS TODO sprawdzić czy tu mają być jakieś mutexy
    if (have_xattr) {
       if (ff_pkt->flags & FO_XATTR && !ff_pkt->cmd_plugin) {
+
+
+    	  // TODO uzyc bsock proxy
          switch (build_xattr_streams(jcr, ff_pkt)) {
          case bxattr_exit_fatal:
             goto bail_out;
@@ -960,10 +989,12 @@ int as_save_file(
              * XATTR_REPORT_ERR_MAX_PER_JOB print the error message set by the
              * lower level routine in jcr->errmsg.
              */
+        	 JCR_P
             if (jcr->xattr_data->u.build->nr_errors < XATTR_REPORT_ERR_MAX_PER_JOB) {
                Jmsg(jcr, M_WARNING, 0, "%s", jcr->errmsg);
             }
             jcr->xattr_data->u.build->nr_errors++;
+            JCR_V
             break;
          case bxattr_exit_ok:
             break;
@@ -976,17 +1007,24 @@ int as_save_file(
       uint32_t size = 0;
 
       if ((sig = crypto_sign_new(jcr)) == NULL) {
+    	  JCR_LOCK_SCOPE
          Jmsg(jcr, M_FATAL, 0, _("Failed to allocate memory for crypto signature.\n"));
          goto bail_out;
       }
 
+
+      // TODO muteks?? jcr->crypto.pki_keypair lub jcr->crypto per w�tek???
+      JCR_P
       if (!crypto_sign_add_signer(sig, signing_digest, jcr->crypto.pki_keypair)) {
          Jmsg(jcr, M_FATAL, 0, _("An error occurred while adding signer the stream.\n"));
+         JCR_V
          goto bail_out;
       }
+      JCR_V
 
       /** Get signature size */
       if (!crypto_sign_encode(sig, NULL, &size)) {
+    	  JCR_LOCK_SCOPE
          Jmsg(jcr, M_FATAL, 0, _("An error occurred while signing the stream.\n"));
          goto bail_out;
       }
@@ -997,11 +1035,15 @@ int as_save_file(
       }
 
       /** Send our header */
-      sd->fsend("%ld %ld 0", jcr->JobFiles, STREAM_SIGNED_DIGEST);
+      JCR_P
+	  int jcr_jobfiles = jcr->JobFiles;
+	  JCR_V
+	  sd->fsend("%ld %ld 0", jcr_jobfiles, STREAM_SIGNED_DIGEST);
       Dmsg1(300, "bfiled>stored:header %s\n", sd->msg);
 
       /** Encode signature data */
       if (!crypto_sign_encode(sig, (uint8_t *)sd->msg, &size)) {
+    	  JCR_LOCK_SCOPE
          Jmsg(jcr, M_FATAL, 0, _("An error occurred while signing the stream.\n"));
          goto bail_out;
       }
@@ -1015,7 +1057,11 @@ int as_save_file(
    if (digest) {
       uint32_t size;
 
-      sd->fsend("%ld %d 0", jcr->JobFiles, digest_stream);
+      JCR_P
+	  int jcr_jobfiles = jcr->JobFiles;
+	  JCR_V
+
+      sd->fsend("%ld %d 0", jcr_jobfiles, digest_stream);
       Dmsg1(300, "bfiled>stored:header %s\n", sd->msg);
 
       size = CRYPTO_DIGEST_MAX_SIZE;
@@ -1026,6 +1072,7 @@ int as_save_file(
       }
 
       if (!crypto_digest_finalize(digest, (uint8_t *)sd->msg, &size)) {
+    	  JCR_LOCK_SCOPE
          Jmsg(jcr, M_FATAL, 0, _("An error occurred finalizing signing the stream.\n"));
          goto bail_out;
       }
@@ -1046,7 +1093,12 @@ int as_save_file(
    /* Check if original file has a digest, and send it */
    if (ff_pkt->type == FT_LNKSAVED && ff_pkt->digest) {
       Dmsg2(300, "Link %s digest %d\n", ff_pkt->fname, ff_pkt->digest_len);
-      sd->fsend("%ld %d 0", jcr->JobFiles, ff_pkt->digest_stream);
+
+      JCR_P
+	  int jcr_jobfiles = jcr->JobFiles;
+	  JCR_V
+
+      sd->fsend("%ld %d 0", jcr_jobfiles, ff_pkt->digest_stream);
 
       // AS TODO UWAGA !!!! AS_BSOCK_PROXY powinno używać bufory z mempoola!!!
       sd->msg = check_pool_memory_size(sd->msg, ff_pkt->digest_len);
@@ -1081,10 +1133,13 @@ good_rtn:
 bail_out:
    // AS TODO jak job jest zatrzymany to powinniśmy wyczyścić całą work queue i
    // uwalić wszystkie wątki
+	JCR_P
    if (jcr->is_canceled()) {
       Dmsg0(100, "Job canceled by user.\n");
       rtnstat = 0;
    }
+	JCR_V
+
    if (plugin_started) {
       // AS TODO ładujemy to do bufora
       send_plugin_name(jcr, sd, false); /* signal end of plugin data */
@@ -1093,6 +1148,8 @@ bail_out:
       // AS TODO tutaj jakiś mutex do jcr'a
       // a może raczej trzeba sprawdzić czy ktoś jeszcze używa i dopiero
       // zerować jak wszyscy skończą
+
+	   JCR_LOCK_SCOPE
       jcr->plugin_sp = NULL;    /* sp is local to this function */
       jcr->plugin_ctx = NULL;
       jcr->plugin = NULL;
@@ -1151,6 +1208,10 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
    return 1;
 #endif
 
+
+   int jcr_jobfiles = 0;
+
+
    msgsave = sd->msg;
    rbuf = sd->msg;                    /* read buffer */
    wbuf = sd->msg;                    /* write buffer */
@@ -1158,6 +1219,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
 
    Dmsg1(300, "Saving data, type=%d\n", ff_pkt->type);
 
+   // TODO obs�uga kompresji - bufor per w�tek
 #if defined(HAVE_LIBZ) || defined(HAVE_LZO)
    uLong compress_len = 0;
    uLong max_compress_len = 0;
@@ -1231,13 +1293,17 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
 
    if (ff_pkt->flags & FO_ENCRYPT) {
       if ((ff_pkt->flags & FO_SPARSE) || (ff_pkt->flags & FO_OFFSETS)) {
+    	  JCR_LOCK_SCOPE
          Jmsg0(jcr, M_FATAL, 0, _("Encrypting sparse or offset data not supported.\n"));
          goto err;
       }
       /** Allocate the cipher context */
+      // TODO powielic per w�tek
       if ((cipher_ctx = crypto_cipher_new(jcr->crypto.pki_session, true,
            &cipher_block_size)) == NULL) {
          /* Shouldn't happen! */
+
+    	  JCR_LOCK_SCOPE
          Jmsg0(jcr, M_FATAL, 0, _("Failed to initialize encryption context.\n"));
          goto err;
       }
@@ -1250,6 +1316,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
        * (Using the larger of either rsize or max_compress_len)
        */
 
+      // TODO trzeba to naprawic
       // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
       // i znowu: współdzielony bufor dla wielu wątków
       // pewnie trzeba tyle buforów ile wątków jest
@@ -1264,9 +1331,15 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
     * Send Data header to Storage daemon
     *    <file-index> <stream> <expected stream length>
     */
-   if (!sd->fsend("%ld %d %lld", jcr->JobFiles, stream,
+
+   JCR_P
+   jcr_jobfiles = jcr->JobFiles;
+   JCR_V
+
+   if (!sd->fsend("%ld %d %lld", jcr_jobfiles, stream,
         (int64_t)ff_pkt->statp.st_size)) {
       // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
+	   JCR_LOCK_SCOPE
       if (!jcr->is_job_canceled()) {
          Jmsg1(jcr, M_FATAL, 0, _("Network send error to SD. ERR=%s\n"),
                sd->bstrerror());
@@ -1329,8 +1402,10 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
          ser_uint64(ff_pkt->bfd.offset);     /* store offset in begin of buffer */
       }
 
+      JCR_P
       // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
       jcr->ReadBytes += sd->msglen;         /* count bytes read */
+      JCR_V
 
       /** Uncompressed cipher input length */
       cipher_input_len = sd->msglen;
@@ -1347,6 +1422,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
          crypto_digest_update(signing_digest, (uint8_t *)rbuf, sd->msglen);
       }
 
+      // TODO do zrobienia
 #ifdef HAVE_LIBZ
       /** Do compression if turned on */
       if (ff_pkt->flags & FO_COMPRESS && ff_pkt->Compress_algo == COMPRESS_GZIP && jcr->pZLIB_compress_workset) {
@@ -1422,6 +1498,8 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
       }
 #endif
 
+      // TODO cale krypto do zrobienia razem z muteksami i buforami do krypto per watek
+
       /**
        * Note, here we prepend the current record length to the beginning
        *  of the encrypted data. This is because both sparse and compression
@@ -1480,6 +1558,8 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
       }
       sd->msg = wbuf;              /* set correct write buffer */
       if (!sd->send()) {
+
+    	  JCR_LOCK_SCOPE
          if (!jcr->is_job_canceled()) {
             Jmsg1(jcr, M_FATAL, 0, _("Network send error to SD. ERR=%s\n"),
                   sd->bstrerror());
@@ -1488,13 +1568,16 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
       }
       Dmsg1(130, "Send data to SD len=%d\n", sd->msglen);
       /*          #endif */
+      JCR_P
       jcr->JobBytes += sd->msglen;      /* count bytes saved possibly compressed/encrypted */
+      JCR_V
       sd->msg = msgsave;                /* restore read buffer */
 
    } /* end while read file data */
 
    if (sd->msglen < 0) {                 /* error */
       berrno be;
+      JCR_LOCK_SCOPE
       Jmsg(jcr, M_ERROR, 0, _("Read error on file %s. ERR=%s\n"),
          ff_pkt->fname, be.bstrerror(ff_pkt->bfd.berrno));
       if (jcr->JobErrors++ > 1000) {       /* insanity check */
@@ -1521,6 +1604,8 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
          sd->msglen = encrypted_len;      /* set encrypted length */
          sd->msg = jcr->crypto.crypto_buf;       /* set correct write buffer */
          if (!sd->send()) {
+
+        	 JCR_LOCK_SCOPE
             if (!jcr->is_job_canceled()) {
                Jmsg1(jcr, M_FATAL, 0, _("Network send error to SD. ERR=%s\n"),
                      sd->bstrerror());
@@ -1528,16 +1613,22 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
             goto err;
          }
          Dmsg1(130, "Send data to SD len=%d\n", sd->msglen);
+         JCR_P
          jcr->JobBytes += sd->msglen;     /* count bytes saved possibly compressed/encrypted */
+         JCR_V
          sd->msg = msgsave;               /* restore bnet buffer */
       }
    }
 
    if (!sd->signal(BNET_EOD)) {        /* indicate end of file data */
+
+  	 JCR_LOCK_SCOPE
+
       if (!jcr->is_job_canceled()) {
          Jmsg1(jcr, M_FATAL, 0, _("Network send error to SD. ERR=%s\n"),
                sd->bstrerror());
       }
+
       goto err;
    }
 
@@ -1890,8 +1981,8 @@ static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &
    }
 
    Dmsg2(300, ">stored: attr len=%d: %s\n", sd->msglen, sd->msg);
-   // TODO LOCK
    if (!stat && !jcr->is_job_canceled()) {
+	   JCR_LOCK_SCOPE
       Jmsg1(jcr, M_FATAL, 0, _("Network send error to SD. ERR=%s\n"),
             sd->bstrerror());
    }
