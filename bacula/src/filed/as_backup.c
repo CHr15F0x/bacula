@@ -473,21 +473,31 @@ as_buffer_t *as_consumer_dequeue_buffer()
 
 void as_release_buffer(as_buffer_t *buffer)
 {
-   P(as_buffer_lock);
+   Pmsg3(50, "\t\t>>>> %4d as_release_buffer() BEGIN %d, free size: %d \n",
+	  my_thread_id(), buffer->id, qsize(&as_free_buffer_queue));
+
+	P(as_buffer_lock);
 
    buffer->size = 0; // Not really needed
    buffer->parent = NULL; // Not really needed
 
    QINSERT(&as_free_buffer_queue, &buffer->bq);
 
-   Pmsg3(50, "\t\t>>>> %4d as_release_buffer() %d, free size: %d \n",
-      my_thread_id(), buffer->id, qsize(&as_free_buffer_queue));
-
    V(as_buffer_lock);
 
 
    pthread_cond_broadcast(&as_buffer_cond);
+
+   Pmsg3(50, "\t\t>>>> %4d as_release_buffer() END %d, free size: %d \n",
+      my_thread_id(), buffer->id, qsize(&as_free_buffer_queue));
 }
+
+
+//
+//
+// TODO AS_BSOCK_PROXY - use as_buffers directly! (da sie tak?)
+//
+//
 
 void *as_consumer_thread_loop(void *arg)
 {
@@ -496,8 +506,7 @@ void *as_consumer_thread_loop(void *arg)
    // Socket is ours now (todo check for sure)
    sd->clear_locking();
 
-   Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() START, sock: %p\n",
-      my_thread_id(), sd);
+   Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() START, sock: %p\n", my_thread_id(), sd);
 
    as_buffer_t *buffer = NULL;
 
@@ -505,33 +514,27 @@ void *as_consumer_thread_loop(void *arg)
 
    while (as_quit_consumer_thread_loop() == false)
    {
-#if 0
-      buffer = as_consumer_dequeue_buffer();
+	  Pmsg1(50, "\t\t>>>> %4d as_consumer_thread_loop() ITERATION BEGIN\n", my_thread_id());
 
-      if (buffer == NULL)
-      {
-    	  // Send queue empty
-    	  continue;
-      }
-#else
       P(as_consumer_queue_lock);
+
+      Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() ITERATION BEGIN cons.q.size: %d\n", my_thread_id(), qsize(&as_consumer_buffer_queue));
+
       while (1)
       {
          buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
          if (buffer)
          {
+        	Pmsg3(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buffer: %d, cons.q.size: %d\n", my_thread_id(), buffer->id, qsize(&as_consumer_buffer_queue));
             break;
          }
          else
          {
+         	Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buffer: WAIT, cons.q.size: %d\n", my_thread_id(), qsize(&as_consumer_buffer_queue));
             pthread_cond_wait(&as_consumer_queue_cond, &as_consumer_queue_lock);
          }
       }
       V(as_consumer_queue_lock);
-#endif
-
-
-
 
       int pos_in_buffer = 0;
 
@@ -559,6 +562,7 @@ void *as_consumer_thread_loop(void *arg)
             sd->send();
 
             to_send -= (buffer->size - pos_in_buffer);
+            // pos_in_buffer = buffer->size; niepotrzebne
             // End of buffer, need to pick up the next one
             break;
          }
@@ -587,10 +591,14 @@ void *as_consumer_thread_loop(void *arg)
 
       ASSERT(buffer);
       as_release_buffer(buffer);
+
+
+      P(as_consumer_queue_lock);
+      Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() ITERATION END cons.q.size: %d\n", my_thread_id(), qsize(&as_consumer_buffer_queue));
+      V(as_consumer_queue_lock);
    }
 
-   Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() STOP, sock: %p\n",
-      my_thread_id(), sd);
+   Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() STOP, sock: %p\n", my_thread_id(), sd);
 
    return NULL;
 }

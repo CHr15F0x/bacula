@@ -137,6 +137,7 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
 
    jcr->buf_size = sd->msglen;
 
+   // TODO we can consume so much more up AS_BUFFER_CAPACITY
    uint32_t as_bsock_proxy_initial_buf_len = sd->msglen;
 
    /**
@@ -769,6 +770,8 @@ int as_save_file(
    if (ff_pkt->type == FT_DELETED) {
       goto good_rtn;
    }
+
+   // TODO CRYPTO
    /** Set up the encryption context and send the session data to the SD */
    if (has_file_data && jcr->crypto.pki_encrypt) {
       // AS TODO sprawdzić czy tu mają być jakieś mutexy
@@ -823,7 +826,7 @@ int as_save_file(
          ff_pkt->ff_errno = errno;
          berrno be;
 
-         JCR_LOCK_SCOPE
+         JCR_P
 
          Jmsg(jcr, M_NOTSAVED, 0, _("     Cannot open \"%s\": ERR=%s.\n"), ff_pkt->fname,
               be.bstrerror());
@@ -831,7 +834,7 @@ int as_save_file(
          // AS TODO o , tutaj muteks !
          jcr->JobErrors++;
 
-         JCR_UNLOCK_SCOPE
+         JCR_V
 
          if (tid) {
             stop_thread_timer(tid);
@@ -853,6 +856,7 @@ int as_save_file(
       );
 
       if (ff_pkt->flags & FO_CHKCHANGES) {
+    	  // TODO jcr locking in this function
          has_file_changed(jcr, ff_pkt);
       }
 
@@ -879,13 +883,13 @@ int as_save_file(
                ff_pkt->ff_errno = errno;
                berrno be;
 
-               JCR_LOCK_SCOPE
+               JCR_P
 
                Jmsg(jcr, M_NOTSAVED, -1, _("     Cannot open resource fork for \"%s\": ERR=%s.\n"),
                     ff_pkt->fname, be.bstrerror());
                jcr->JobErrors++;
 
-               JCR_UNLOCK_SCOPE
+               JCR_V
 
                if (is_bopen(&ff_pkt->bfd)) {
                   // TODO uwaga - operujemy na kopii ff_pkt
@@ -917,11 +921,11 @@ int as_save_file(
 
          Dmsg1(300, "Saving Finder Info for \"%s\"\n", ff_pkt->fname);
 
-         JCR_LOCK_SCOPE
+         JCR_P
+		 int jcr_jobfiles = jcr->JobFiles;
+         JCR_V
 
-         sd->fsend("%ld %d 0", jcr->JobFiles, STREAM_HFSPLUS_ATTRIBUTES);
-
-         JCR_UNLOCK_SCOPE
+         sd->fsend("%ld %d 0", jcr_jobfiles, STREAM_HFSPLUS_ATTRIBUTES);
 
          Dmsg1(300, "bfiled>stored:header %s\n", sd->msg);
          pm_memcpy(sd->msg, ff_pkt->hfsinfo.fndrinfo, 32);
@@ -1981,11 +1985,14 @@ static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &
    }
 
    Dmsg2(300, ">stored: attr len=%d: %s\n", sd->msglen, sd->msg);
+
+   JCR_P
    if (!stat && !jcr->is_job_canceled()) {
-	   JCR_LOCK_SCOPE
       Jmsg1(jcr, M_FATAL, 0, _("Network send error to SD. ERR=%s\n"),
             sd->bstrerror());
    }
+   JCR_V
+
    sd->signal(BNET_EOD);            /* indicate end of attributes data */
    return stat;
 }

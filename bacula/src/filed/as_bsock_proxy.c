@@ -48,7 +48,7 @@ bool AS_BSOCK_PROXY::send()
       /* Make sure the current buffer is marked for big file */
       as_buf->parent = this;
       as_consumer_enqueue_buffer(as_buf, false);
-      /* Get a new one which is already marked */
+      /* Get a new one which is already marked */ // TODO <<< na pewno?
       as_buf = as_acquire_buffer(this);
 
 //      Pmsg2(50, "\t\t>>>> %4d 1 as_buf: %p\n", my_thread_id(), as_buf);
@@ -74,7 +74,7 @@ bool AS_BSOCK_PROXY::send()
    char *pos = msg;
    int32_t to_send = msglen;
 
-   while (to_send > AS_BUFFER_CAPACITY)
+   while (as_buf->size + to_send > AS_BUFFER_CAPACITY)
    {
       /* Fill the current buffer */
       int32_t send_now = AS_BUFFER_CAPACITY - as_buf->size;

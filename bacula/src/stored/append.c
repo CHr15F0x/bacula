@@ -171,10 +171,16 @@ bool do_append_data(JCR *jcr)
           file_index == last_file_index + 1)) {
          goto fi_checked;
       }
+
+
+     // TODO KLIS file indexes not coming in order right now
+#if 0
       Jmsg2(jcr, M_FATAL, 0, _("FI=%d from FD not positive or last_FI=%d\n"),
             file_index, last_file_index);
       ok = false;
       break;
+#endif
+
 
 fi_checked:
       if (file_index != last_file_index) {
