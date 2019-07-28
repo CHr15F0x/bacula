@@ -116,7 +116,7 @@ void *as_workqueue_engine(void *arg);
 // Consumer loop
 //
 
-bool as_quit_consumer_thread_loop();
+bool as_dont_quit_consumer_thread_loop();
 
 as_buffer_t *as_consumer_dequeue_buffer();
 void as_release_buffer(as_buffer_t *buffer);

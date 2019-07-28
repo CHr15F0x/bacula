@@ -87,7 +87,7 @@ as_buffer_t *as_acquire_buffer(AS_BSOCK_PROXY *parent)
    /** Wait for a buffer to become available */
    // while (as_workqueue_engine_quit() == false) // cancel if job canceled
    P(as_buffer_lock);
-   while (1)
+   while (as_workqueue_engine_quit() == false) // TODO check for quit
    {
       buffer = (as_buffer_t *)QREMOVE(&as_free_buffer_queue);
 
@@ -102,6 +102,9 @@ as_buffer_t *as_acquire_buffer(AS_BSOCK_PROXY *parent)
       }
       else
       {
+         Pmsg3(50, "\t\t>>>> %4d as_acquire_buffer() WAIT parent: %4d, free size: %d \n",
+            my_thread_id(), parent ? parent->id : -1, qsize(&as_free_buffer_queue));
+
          pthread_cond_wait(&as_buffer_cond, &as_buffer_lock); // timed wait? because of while (1)
       }
    }
@@ -137,18 +140,24 @@ void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
 
       do
       {
-         last = (as_buffer_t *)qnext(&as_consumer_buffer_queue, &last->bq);
+         last = (as_buffer_t *)qnext(&as_consumer_buffer_queue, &as_consumer_buffer_queue);
 
-         if (last->parent == as_bigfile_bsock_proxy)
+         if ((last != NULL) && (last->parent == as_bigfile_bsock_proxy))
          {
             break;
          }
-
       } while (last != NULL);
 
-	   // Buffers for this big file can have already been sent, then put this buffer at the beginning of the queue
+      // Buffers for this big file can have already been sent, then put this buffer at the beginning of the queue
+      if (last == NULL)
+      {
+         qinsert_after(&as_consumer_buffer_queue, NULL, &buffer->bq);
+      }
       // Or are still in the queue, then put the buffer after the last buffer for this file
-      qinsert_after(&as_consumer_buffer_queue, &last->bq, &buffer->bq);
+      else
+      {
+         qinsert_after(&as_consumer_buffer_queue, &last->bq, &buffer->bq);
+      }
 
       if (finalize)
       {
@@ -439,21 +448,26 @@ void *as_workqueue_engine(void *arg)
 // Consumer loop
 //
 
-bool as_quit_consumer_thread_loop()
+bool as_dont_quit_consumer_thread_loop()
 {
    bool quit = false;
-   int size = 0;
 
    P(as_consumer_thread_lock);
    quit = as_consumer_thread_quit;
    V(as_consumer_thread_lock);
 
+   return (!quit);
+}
+
+bool as_consumer_queue_not_empty()
+{
+   int size = 0;
+
    P(as_consumer_queue_lock);
    size = qsize(&as_consumer_buffer_queue);
    V(as_consumer_queue_lock);
 
-   /* Only quit loop if quit requested and all data sent to socket */
-   return quit && (size == 0);
+   return (size > 0);
 }
 
 as_buffer_t *as_consumer_dequeue_buffer()
@@ -492,6 +506,8 @@ void as_release_buffer(as_buffer_t *buffer)
       my_thread_id(), buffer->id, qsize(&as_free_buffer_queue));
 }
 
+pthread_cond_t as_consumer_thread_begin_cond = PTHREAD_COND_INITIALIZER;
+pthread_mutex_t as_consumer_thread_begin_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 //
 //
@@ -508,11 +524,14 @@ void *as_consumer_thread_loop(void *arg)
 
    Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() START, sock: %p\n", my_thread_id(), sd);
 
+   // signal thread started
+   pthread_cond_signal(&as_consumer_thread_begin_cond);
+
    as_buffer_t *buffer = NULL;
 
    int32_t to_send = 0;
 
-   while (as_quit_consumer_thread_loop() == false)
+   while (as_dont_quit_consumer_thread_loop())// && as_consumer_queue_not_empty())
    {
 	  Pmsg1(50, "\t\t>>>> %4d as_consumer_thread_loop() ITERATION BEGIN\n", my_thread_id());
 
@@ -520,7 +539,7 @@ void *as_consumer_thread_loop(void *arg)
 
       Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() ITERATION BEGIN cons.q.size: %d\n", my_thread_id(), qsize(&as_consumer_buffer_queue));
 
-      while (1)
+      while (as_dont_quit_consumer_thread_loop())
       {
          buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
          if (buffer)
@@ -548,20 +567,24 @@ void *as_consumer_thread_loop(void *arg)
             memcpy(&to_send, &buffer->data[pos_in_buffer], sizeof(to_send));
             pos_in_buffer += sizeof(to_send);
 
-            Pmsg5(50, "\t\t>>>> %4d as_consumer_thread_loop() buf: %4d, tosend: %4d, pos: %4d, bufsize: %4d\n",
+            Pmsg5(50, "\t\t>>>> %4d GET_TO_SEND as_consumer_thread_loop() buf: %4d, tosend: %4d, pos: %4d, bufsize: %4d\n",
                my_thread_id(), buffer->id, to_send, pos_in_buffer, buffer->size);
          }
 
          if (pos_in_buffer + to_send > buffer->size)
          {
-            Pmsg5(50, "\t\t>>>> %4d as_consumer_thread_loop() buf: %4d, tosend: %4d, pos: %4d, bufsize: %4d\n",
-               my_thread_id(), buffer->id, to_send, pos_in_buffer, buffer->size);
+            Pmsg5(50, "\t\t>>>> %4d SEND_LESS_B as_consumer_thread_loop() buf: %4d, tosend: %4d, pos: %4d, bufsize: %4d\n",
+            my_thread_id(), buffer->id, to_send, pos_in_buffer, buffer->size);
 
             sd->msg = &buffer->data[pos_in_buffer];
             sd->msglen = (buffer->size - pos_in_buffer);
             sd->send();
 
             to_send -= (buffer->size - pos_in_buffer);
+
+            Pmsg5(50, "\t\t>>>> %4d SEND_LESS_E as_consumer_thread_loop() buf: %4d, tosend: %4d, pos: %4d, bufsize: %4d\n",
+               my_thread_id(), buffer->id, to_send, pos_in_buffer, buffer->size);
+
             // pos_in_buffer = buffer->size; niepotrzebne
             // End of buffer, need to pick up the next one
             break;
@@ -569,7 +592,7 @@ void *as_consumer_thread_loop(void *arg)
 
          if (to_send < 0) // signal
          {
-            Pmsg5(50, "\t\t>>>> %4d as_consumer_thread_loop() buf: %4d, tosend: %4d, pos: %4d, bufsize: %4d\n",
+            Pmsg5(50, "\t\t>>>> %4d SEND_SIGNAL as_consumer_thread_loop() buf: %4d, tosend: %4d, pos: %4d, bufsize: %4d\n",
                my_thread_id(), buffer->id, to_send, pos_in_buffer, buffer->size);
 
             sd->signal(to_send);
@@ -577,7 +600,7 @@ void *as_consumer_thread_loop(void *arg)
          }
          else
          {
-            Pmsg5(50, "\t\t>>>> %4d as_consumer_thread_loop() buf: %4d, tosend: %4d, pos: %4d, bufsize: %4d\n",
+            Pmsg5(50, "\t\t>>>> %4d SEND_ENTIRE as_consumer_thread_loop() buf: %4d, tosend: %4d, pos: %4d, bufsize: %4d\n",
                my_thread_id(), buffer->id, to_send, pos_in_buffer, buffer->size);
 
             sd->msg = &buffer->data[pos_in_buffer];
@@ -633,6 +656,17 @@ void as_init_consumer_thread(BSOCK *sd)
       my_thread_id(), H(as_consumer_thread), sd);
 }
 
+void as_wait_consumer_thread_started()
+{
+   P(as_consumer_thread_begin_mutex);
+   while (as_dont_quit_consumer_thread_loop())
+   {
+      Pmsg1(50, "\t\t>>>> %4d as_wait_consumer_thread_started()\n", my_thread_id());
+      pthread_cond_wait(&as_consumer_thread_begin_cond, &as_consumer_thread_begin_mutex);
+   }
+   V(as_consumer_thread_begin_mutex);
+}
+
 void as_workqueue_init()
 {
    Pmsg1(50, "\t\t>>>> %4d as_workqueue_init()\n", my_thread_id());
@@ -654,6 +688,11 @@ void as_init(BSOCK *sd, uint32_t buf_size)
 
 	as_init_free_buffers_queue();
 	as_init_consumer_thread(sd);
+
+	while (as_dont_quit_consumer_thread_loop() == false)
+	{}
+
+	// as_wait_consumer_thread_started();
 	as_workqueue_init();
 }
 

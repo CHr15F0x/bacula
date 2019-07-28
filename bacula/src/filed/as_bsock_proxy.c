@@ -64,6 +64,8 @@ bool AS_BSOCK_PROXY::send()
    memcpy(&as_buf->data[as_buf->size], &msglen, sizeof(msglen));
    as_buf->size += sizeof(msglen);
 
+   ASSERT(as_buf->size <= AS_BUFFER_CAPACITY);
+
    /* This is a signal, there is no msg data */
    if (msglen < 0)
    {
@@ -83,6 +85,8 @@ bool AS_BSOCK_PROXY::send()
       pos += send_now;
       to_send -= send_now;
 
+      ASSERT(as_buf->size <= AS_BUFFER_CAPACITY);
+
       /* Make sure the current buffer is marked for big file */
       as_buf->parent = this;
       as_consumer_enqueue_buffer(as_buf, false);
@@ -94,6 +98,8 @@ bool AS_BSOCK_PROXY::send()
    {
       memcpy(&as_buf->data[as_buf->size], pos, to_send);
       as_buf->size += to_send;
+
+      ASSERT(as_buf->size <= AS_BUFFER_CAPACITY);
    }
 
    return true;
