@@ -160,6 +160,9 @@ bool do_append_data(JCR *jcr)
       Dmsg3(890, "<filed: Header FilInx=%d stream=%d stream_len=%lld\n",
          file_index, stream, stream_len);
 
+      // KLIS
+      Pmsg1(50, "\t\t>>>> APPEND last_file_index: %d\n", last_file_index);
+
       /*
        * We make sure the file_index is advancing sequentially.
        */
@@ -180,7 +183,6 @@ bool do_append_data(JCR *jcr)
       ok = false;
       break;
 #endif
-
 
 fi_checked:
       if (file_index != last_file_index) {
