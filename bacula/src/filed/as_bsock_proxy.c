@@ -86,12 +86,16 @@ bool AS_BSOCK_PROXY::send()
       to_send -= send_now;
 
       ASSERT(as_buf->size <= AS_BUFFER_CAPACITY);
+      ASSERT(pos <= msg + msglen);
 
       /* Make sure the current buffer is marked for big file */
       as_buf->parent = this;
       as_consumer_enqueue_buffer(as_buf, false);
       /* Get a new one which is already marked */
       as_buf = as_acquire_buffer(this);
+
+      ASSERT(as_buf != NULL);
+      ASSERT(as_buf->size == 0);
    }
 
    if (to_send > 0)
