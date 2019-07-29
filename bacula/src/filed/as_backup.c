@@ -568,7 +568,9 @@ void *as_consumer_thread_loop(void *arg)
 
    as_buffer_t *buffer = NULL;
 
-   int32_t to_send = 0;
+#define NEED_TO_INIT -9999
+
+   int32_t to_send = NEED_TO_INIT;
 
    while (as_dont_quit_consumer_thread_loop())// && as_consumer_queue_not_empty())
    {
@@ -601,7 +603,7 @@ void *as_consumer_thread_loop(void *arg)
 
       while (pos_in_buffer < buffer->size)
       {
-         if (to_send == 0)
+         if (to_send == NEED_TO_INIT)
          {
             memcpy(&to_send, &buffer->data[pos_in_buffer], sizeof(to_send));
             pos_in_buffer += sizeof(to_send);
@@ -635,9 +637,9 @@ void *as_consumer_thread_loop(void *arg)
                my_thread_id(), buffer->id, buffer, to_send, pos_in_buffer, buffer->size);
 
             sd->signal(to_send);
-            to_send = 0;
+            to_send = NEED_TO_INIT;
          }
-         else
+         else if (to_send > 0)
          {
             Pmsg6(50, "\t\t>>>> %4d SEND_ENTIRE as_consumer_thread_loop() buf: %4d (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
                my_thread_id(), buffer->id, buffer, to_send, pos_in_buffer, buffer->size);
@@ -647,8 +649,10 @@ void *as_consumer_thread_loop(void *arg)
             sd->send();
 
             pos_in_buffer += to_send;
-            to_send = 0;
+            to_send = NEED_TO_INIT;
          }
+
+         ASSERT(to_send != 0);
       }
 
       ASSERT(buffer);
@@ -667,6 +671,8 @@ void *as_consumer_thread_loop(void *arg)
 
    return NULL;
 }
+
+#undef NEED_TO_INIT
 
 //
 // Initialization

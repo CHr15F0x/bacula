@@ -33,6 +33,11 @@ bool AS_BSOCK_PROXY::send()
 {
    Pmsg4(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::send() msglen: %4d msg: %4d\n", my_thread_id(), id, msglen, H(msg));
 
+   if (msglen == 0)
+   {
+	   return true;
+   }
+
    /* New file to be sent */
    if (as_buf == NULL)
    {
