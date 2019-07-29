@@ -138,7 +138,8 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
    jcr->buf_size = sd->msglen;
 
    // TODO we can consume so much more up AS_BUFFER_CAPACITY
-   uint32_t as_bsock_proxy_initial_buf_len = sd->msglen;
+   // uint32_t as_bsock_proxy_initial_buf_len = sd->msglen;
+   uint32_t as_bsock_proxy_initial_buf_len = AS_BUFFER_CAPACITY;
 
    /**
     * Adjust for compression so that output buffer is
@@ -231,7 +232,7 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
    // Czy to jest potrzebne???
    // sm_check(__FILE__, __LINE__, true);
 
-   sd->set_locking();
+//   sd->set_locking(); TODO potrzebne???
 
 
 
@@ -289,9 +290,13 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
    Pmsg4(50, "\t\t\t>>>> %4d BEFORE last signal, sock: %p msg: %p msglen: %d\n",
       my_thread_id(), sd, sd->msg, sd->msglen);
 
-   print_memory_pool_stats();
+//   print_memory_pool_stats();
 
    sd->signal(BNET_EOD);            /* end of sending data */
+
+   Pmsg4(50, "\t\t\t>>>> %4d AFTER last signal, sock: %p msg: %p msglen: %d\n",
+      my_thread_id(), sd, sd->msg, sd->msglen);
+
 
    if (have_acl && jcr->acl_data) {
       free_pool_memory(jcr->acl_data->u.build->content);

@@ -140,6 +140,10 @@ void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
 {
 	P(as_consumer_queue_lock);
 
+    Pmsg5(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d (%p), BEGIN bigfile: %4d, cons.q.size: %d\n",
+       my_thread_id(), buffer->id, buffer, as_bigfile_bsock_proxy ? as_bigfile_bsock_proxy->id : -1,
+       qsize(&as_consumer_buffer_queue));
+
 	if (as_bigfile_bsock_proxy == NULL)
 	{
 	   as_bigfile_bsock_proxy = buffer->parent;
@@ -163,13 +167,19 @@ void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
 
       do
       {
-         last = (as_buffer_t *)qnext(&as_consumer_buffer_queue, &as_consumer_buffer_queue);
+         last = (as_buffer_t *)qnext(&as_consumer_buffer_queue, last ? &last->bq : NULL);
 
          if ((last != NULL) && (last->parent == as_bigfile_bsock_proxy))
          {
+             Pmsg3(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() last: %d (%p)\n",
+                my_thread_id(), last->id, last);
+
             break;
          }
       } while (last != NULL);
+
+      Pmsg3(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() last: %d (%p)\n",
+         my_thread_id(), last ? last->id : -1, last);
 
       // Buffers for this big file can have already been sent, then put this buffer at the beginning of the queue
       if (last == NULL)
@@ -196,6 +206,10 @@ void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
 
 	   QINSERT(&as_consumer_buffer_queue, &buffer->bq);
 	}
+
+    Pmsg5(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d (%p), END bigfile: %4d, cons.q.size: %d\n",
+       my_thread_id(), buffer->id, buffer, as_bigfile_bsock_proxy ? as_bigfile_bsock_proxy->id : -1,
+       qsize(&as_consumer_buffer_queue));
 
 	V(as_consumer_queue_lock);
 
@@ -482,6 +496,7 @@ bool as_dont_quit_consumer_thread_loop()
    return (!quit);
 }
 
+#if 0
 bool as_consumer_queue_not_empty()
 {
    int size = 0;
@@ -492,6 +507,7 @@ bool as_consumer_queue_not_empty()
 
    return (size > 0);
 }
+#endif
 
 as_buffer_t *as_consumer_dequeue_buffer()
 {
@@ -543,7 +559,7 @@ void *as_consumer_thread_loop(void *arg)
    BSOCK *sd = (BSOCK *)arg;
 
    // Socket is ours now (todo check for sure)
-   sd->clear_locking();
+   // sd->clear_locking(); // TODO potrzebne?
 
    Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() START, sock: %p\n", my_thread_id(), sd);
 
@@ -638,10 +654,13 @@ void *as_consumer_thread_loop(void *arg)
       ASSERT(buffer);
       as_release_buffer(buffer);
 
-
+#if 0
       P(as_consumer_queue_lock);
       Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() ITERATION END cons.q.size: %d\n", my_thread_id(), qsize(&as_consumer_buffer_queue));
       V(as_consumer_queue_lock);
+#endif
+
+      Pmsg1(50, "\t\t>>>> %4d as_consumer_thread_loop() ITERATION END\n", my_thread_id());
    }
 
    Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() STOP, sock: %p\n", my_thread_id(), sd);
@@ -716,6 +735,7 @@ void as_init(BSOCK *sd, uint32_t buf_size)
 	as_init_free_buffers_queue();
 	as_init_consumer_thread(sd);
 
+	// wait for consumer thread started
 	while (as_dont_quit_consumer_thread_loop() == false)
 	{}
 
@@ -747,6 +767,54 @@ void as_join_consumer_thread()
 	pthread_join(as_consumer_thread, NULL);
 }
 
+void as_dealloc_all_buffers()
+{
+   Pmsg3(50, "\t\t>>>> %4d as_dealloc_all_buffers() BEGIN, free size %4d consumer size %4d\n",
+      my_thread_id(), qsize(&as_free_buffer_queue), qsize(&as_consumer_buffer_queue));
+
+   as_buffer_t *buffer = NULL;
+   int buffer_counter = 0;
+
+   do
+   {
+      buffer = (as_buffer_t *)QREMOVE(&as_free_buffer_queue);
+      if (buffer)
+      {
+    	   Pmsg3(50, "\t\t>>>> %4d as_dealloc_all_buffers() FREE buffer: %d (%p)\n",
+    	      my_thread_id(), buffer->id, buffer);
+
+    	  // Smart alloc does not allow free(NULL), which is inconsistent with how free works
+         free(buffer);
+         ++buffer_counter;
+      }
+   } while (buffer != NULL);
+
+   do
+   {
+      buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
+      if (buffer)
+      {
+   	   Pmsg3(50, "\t\t>>>> %4d as_dealloc_all_buffers() CONS buffer: %d (%p)\n",
+   	      my_thread_id(), buffer->id, buffer);
+
+    	  // Smart alloc does not allow free(NULL), which is inconsistent with how free works
+         free(buffer);
+         ++buffer_counter;
+      }
+   } while (buffer != NULL);
+
+   Pmsg3(50, "\t\t>>>> %4d as_dealloc_all_buffers() END, free size %4d consumer size %4d\n",
+      my_thread_id(), qsize(&as_free_buffer_queue), qsize(&as_consumer_buffer_queue));
+
+   ASSERT(0 == qsize(&as_free_buffer_queue));
+   ASSERT(0 == qsize(&as_consumer_buffer_queue));
+   ASSERT(buffer_counter == AS_BUFFERS);
+}
+
+
+
+
+#if 0
 void as_release_remaining_consumer_buffers()
 {
 	as_buffer_t *buffer = NULL;
@@ -805,6 +873,7 @@ void as_clear_free_buffers_queue()
    ASSERT(0 == qsize(&as_free_buffer_queue));
    ASSERT(buffer_counter == AS_BUFFERS);
 }
+#endif
 
 void as_workqueue_destroy()
 {
@@ -821,9 +890,12 @@ void as_shutdown(BSOCK *sd)
 
    as_request_consumer_thread_quit();
    as_join_consumer_thread();
-   as_release_remaining_consumer_buffers();
 
-   as_clear_free_buffers_queue();
+
+//   as_release_remaining_consumer_buffers();
+//   as_clear_free_buffers_queue();
+
+   as_dealloc_all_buffers();
 
    // Restore the pointer to the poolmem
    sd->msg = as_save_msg_pointer;
