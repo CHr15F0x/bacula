@@ -89,6 +89,15 @@ bool AS_BSOCK_PROXY::send()
    ASSERT(as_buf != NULL);
    ASSERT(as_buf->size <= AS_BUFFER_CAPACITY - sizeof(msglen));
 
+   Pmsg7(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::send() PUT MSGLEN buf: %d bufsize: %4d parent: %d msglen: %4d msg: %4d\n",
+      my_thread_id(),
+      id,
+      as_buf ? as_buf->id : -1,
+      as_buf ? as_buf->size : -1,
+      as_buf ? (as_buf->parent ? as_buf->parent->id : -1) : -1,
+      msglen,
+      H(msg));
+
    /* Put the lenght of data first */
    memcpy(&as_buf->data[as_buf->size], &msglen, sizeof(msglen));
    as_buf->size += sizeof(msglen);
@@ -154,7 +163,7 @@ bool AS_BSOCK_PROXY::send()
       ASSERT(as_buf->size <= AS_BUFFER_CAPACITY);
    }
 
-   Pmsg7(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::send() END buf: %d bufsize: %4d parent: %d msglen: %4d msg: %4d\n",
+   Pmsg7(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::send() END   buf: %d bufsize: %4d parent: %d msglen: %4d msg: %4d\n",
 	   my_thread_id(),
 	   id,
 	   as_buf ? as_buf->id : -1,

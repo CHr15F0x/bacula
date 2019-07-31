@@ -82,7 +82,7 @@ static BQUEUE as_free_buffer_queue =
 
 as_buffer_t *as_acquire_buffer(AS_BSOCK_PROXY *parent)
 {
-   Pmsg2(50, "\t\t\t>>>> %4d as_acquire_buffer() BEGIN parent: %4d\n",
+   Pmsg2(50, "\t\t>>>> %4d as_acquire_buffer() BEGIN parent: %4d\n",
       my_thread_id(), parent ? parent->id : -1);
 
    as_buffer_t *buffer = NULL;
@@ -511,8 +511,8 @@ void as_release_buffer(as_buffer_t *buffer)
 
 	P(as_buffer_lock);
 
-   buffer->size = 0; // Not really needed
-   buffer->parent = NULL; // Not really needed
+   buffer->size = 0;
+   buffer->parent = NULL;
 #if 0
    BQUEUE bq;
    char data[AS_BUFFER_CAPACITY];
@@ -581,8 +581,8 @@ void *as_consumer_thread_loop(void *arg)
                buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
                if (buffer)
                {
-               Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE BIGFILE buf: %d (%p) bufsize: %d parent: %d, cons.q.size: %d\n",
-                  my_thread_id(), buffer->id, buffer, buffer->size, buffer->parent ? buffer->parent->id : -1, qsize(&as_consumer_buffer_queue));
+               Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE BIGFILE buf: %d bufsize: %d parent: %d (%p), cons.q.size: %d\n",
+                  my_thread_id(), buffer->id, buffer->size, buffer->parent ? buffer->parent->id : -1, buffer->parent , qsize(&as_consumer_buffer_queue));
                   break;
                }
                else
@@ -605,8 +605,8 @@ void *as_consumer_thread_loop(void *arg)
                buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
                if (buffer)
                {
-               Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: %d (%p) bufsize: %d parent: %d, cons.q.size: %d\n",
-                  my_thread_id(), buffer->id, buffer, buffer->size, buffer->parent ? buffer->parent->id : -1, qsize(&as_consumer_buffer_queue));
+               Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE SMALL buf: %d bufsize: %d parent: %d (%p), cons.q.size: %d\n",
+                  my_thread_id(), buffer->id, buffer->size, buffer->parent ? buffer->parent->id : -1, buffer->parent , qsize(&as_consumer_buffer_queue));
                   break;
                }
                else
@@ -621,20 +621,8 @@ void *as_consumer_thread_loop(void *arg)
             }
          }
 
-#if 0
-         buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
-         if (buffer)
-         {
-        	Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: %d (%p) bufsize: %d parent: %d, cons.q.size: %d\n",
-				my_thread_id(), buffer->id, buffer, buffer->size, buffer->parent ? buffer->parent->id : -1, qsize(&as_consumer_buffer_queue));
-            break;
-         }
-         else
-#endif
-         {
-         	Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: WAIT, cons.q.size: %d\n", my_thread_id(), qsize(&as_consumer_buffer_queue));
-            pthread_cond_wait(&as_consumer_queue_cond, &as_consumer_queue_lock);
-         }
+         Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: WAIT, cons.q.size: %d\n", my_thread_id(), qsize(&as_consumer_buffer_queue));
+         pthread_cond_wait(&as_consumer_queue_cond, &as_consumer_queue_lock);
       }
       V(as_consumer_queue_lock);
 
@@ -654,8 +642,8 @@ void *as_consumer_thread_loop(void *arg)
 
       int pos_in_buffer = 0;
 
-      Pmsg8(50, "\t\t>>>> %4d as_consumer_thread_loop() START SENDING IN THIS ITER buf: %4d (%p) bufsize: %d parent: %d, tosend: %4d, pos: %4d, bufsize: %4d\n",
-         my_thread_id(), buffer->id, buffer, buffer->size, buffer->parent ? buffer->parent->id : -1, to_send, pos_in_buffer, buffer->size);
+      Pmsg8(50, "\t\t>>>> %4d as_consumer_thread_loop() START SENDING IN THIS ITER buf: %4d bufsize: %d parent: %d (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
+         my_thread_id(), buffer->id, buffer->size, buffer->parent ? buffer->parent->id : -1, buffer->parent, to_send, pos_in_buffer, buffer->size);
 
       while (pos_in_buffer < buffer->size)
       {
@@ -664,16 +652,16 @@ void *as_consumer_thread_loop(void *arg)
             memcpy(&to_send, &buffer->data[pos_in_buffer], sizeof(to_send));
             pos_in_buffer += sizeof(to_send);
 
-            Pmsg8(50, "\t\t>>>> %4d GET_TO_SEND as_consumer_thread_loop() buf: %4d (%p) bufsize: %d parent: %d, tosend: %4d, pos: %4d, bufsize: %4d\n",
-               my_thread_id(), buffer->id, buffer, buffer->size, buffer->parent ? buffer->parent->id : -1, to_send, pos_in_buffer, buffer->size);
+            Pmsg8(50, "\t\t>>>> %4d GET_TO_SEND as_consumer_thread_loop() buf: %4d bufsize: %d parent: %d (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
+               my_thread_id(), buffer->id, buffer->size, buffer->parent ? buffer->parent->id : -1, buffer->parent, to_send, pos_in_buffer, buffer->size);
 
             ASSERT(to_send != 0);
          }
 
          if (pos_in_buffer + to_send > buffer->size)
          {
-            Pmsg8(50, "\t\t>>>> %4d SEND_LESS_B as_consumer_thread_loop() buf: %4d (%p) bufsize: %d parent: %d, tosend: %4d, pos: %4d, bufsize: %4d\n",
-            		my_thread_id(), buffer->id, buffer, buffer->size, buffer->parent ? buffer->parent->id : -1, to_send, pos_in_buffer, buffer->size);
+            Pmsg8(50, "\t\t>>>> %4d SEND_LESS_B as_consumer_thread_loop() buf: %4d bufsize: %d parent: %d (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
+            		my_thread_id(), buffer->id, buffer->size, buffer->parent ? buffer->parent->id : -1, buffer->parent, to_send, pos_in_buffer, buffer->size);
 
             sd->msg = &buffer->data[pos_in_buffer];
             sd->msglen = (buffer->size - pos_in_buffer);
@@ -681,8 +669,8 @@ void *as_consumer_thread_loop(void *arg)
 
             to_send -= (buffer->size - pos_in_buffer);
 
-            Pmsg8(50, "\t\t>>>> %4d SEND_LESS_E as_consumer_thread_loop() buf: %4d (%p) bufsize: %d parent: %d, tosend: %4d, pos: %4d, bufsize: %4d\n",
-               my_thread_id(), buffer->id, buffer, buffer->size, buffer->parent ? buffer->parent->id : -1, to_send, pos_in_buffer, buffer->size);
+            Pmsg8(50, "\t\t>>>> %4d SEND_LESS_E as_consumer_thread_loop() buf: %4d bufsize: %d parent: %d (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
+                  my_thread_id(), buffer->id, buffer->size, buffer->parent ? buffer->parent->id : -1, buffer->parent, to_send, pos_in_buffer, buffer->size);
 
             // pos_in_buffer = buffer->size; niepotrzebne
             // End of buffer, need to pick up the next one
@@ -691,16 +679,16 @@ void *as_consumer_thread_loop(void *arg)
 
          if ((to_send < 0) && (to_send != NEED_TO_INIT)) // signal
          {
-            Pmsg8(50, "\t\t>>>> %4d SEND_SIGNAL as_consumer_thread_loop() buf: %4d (%p) bufsize: %d parent: %d, tosend: %4d, pos: %4d, bufsize: %4d\n",
-               my_thread_id(), buffer->id, buffer, buffer->size, buffer->parent ? buffer->parent->id : -1, to_send, pos_in_buffer, buffer->size);
+            Pmsg8(50, "\t\t>>>> %4d SEND_SIGNAL as_consumer_thread_loop() buf: %4d bufsize: %d parent: %d (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
+                  my_thread_id(), buffer->id, buffer->size, buffer->parent ? buffer->parent->id : -1, buffer->parent, to_send, pos_in_buffer, buffer->size);
 
             sd->signal(to_send);
             to_send = NEED_TO_INIT;
          }
          else if (to_send > 0)
          {
-            Pmsg8(50, "\t\t>>>> %4d SEND_ENTIRE as_consumer_thread_loop() buf: %4d (%p) bufsize: %d parent: %d, tosend: %4d, pos: %4d, bufsize: %4d\n",
-               my_thread_id(), buffer->id, buffer, buffer->size, buffer->parent ? buffer->parent->id : -1, to_send, pos_in_buffer, buffer->size);
+            Pmsg8(50, "\t\t>>>> %4d SEND_ENTIRE as_consumer_thread_loop() buf: %4d bufsize: %d parent: %d (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
+                  my_thread_id(), buffer->id, buffer->size, buffer->parent ? buffer->parent->id : -1, buffer->parent, to_send, pos_in_buffer, buffer->size);
 
             sd->msg = &buffer->data[pos_in_buffer];
             sd->msglen = to_send;
@@ -713,8 +701,8 @@ void *as_consumer_thread_loop(void *arg)
          ASSERT(to_send != 0);
       }
 
-      Pmsg8(50, "\t\t>>>> %4d as_consumer_thread_loop() END SENDING IN THIS ITER buf: %4d (%p) bufsize: %d parent: %d, tosend: %4d, pos: %4d, bufsize: %4d\n",
-         my_thread_id(), buffer->id, buffer, buffer->size, buffer->parent ? buffer->parent->id : -1, to_send, pos_in_buffer, buffer->size);
+      Pmsg8(50, "\t\t>>>> %4d END SENDING THIS ITER as_consumer_thread_loop() buf: %4d bufsize: %d parent: %d (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
+            my_thread_id(), buffer->id, buffer->size, buffer->parent ? buffer->parent->id : -1, buffer->parent, to_send, pos_in_buffer, buffer->size);
 
       ASSERT(buffer);
       as_release_buffer(buffer);
