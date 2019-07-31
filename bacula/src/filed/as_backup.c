@@ -109,7 +109,7 @@ as_buffer_t *as_acquire_buffer(AS_BSOCK_PROXY *parent)
    /** Wait for a buffer to become available */
    // while (as_workqueue_engine_quit() == false) // cancel if job canceled
    P(as_buffer_lock);
-   //while (as_workqueue_engine_quit() == false) // TODO check for quit << to nie dzia³a trzeba jakoœ inaczej sprawdzac
+   //while (as_workqueue_engine_quit() == false) // TODO check for quit << to nie dziaï¿½a trzeba jakoï¿½ inaczej sprawdzac
    while (1) // TODO check for quit
    {
       buffer = (as_buffer_t *)QREMOVE(&as_free_buffer_queue);
@@ -500,19 +500,6 @@ bool as_dont_quit_consumer_thread_loop()
    return (!quit);
 }
 
-#if 0
-bool as_consumer_queue_not_empty()
-{
-   int size = 0;
-
-   P(as_consumer_queue_lock);
-   size = qsize(&as_consumer_buffer_queue);
-   V(as_consumer_queue_lock);
-
-   return (size > 0);
-}
-#endif
-
 as_buffer_t *as_consumer_dequeue_buffer()
 {
    as_buffer_t *buffer = NULL;
@@ -555,9 +542,6 @@ void as_release_buffer(as_buffer_t *buffer)
       my_thread_id(), buffer->id, buffer, qsize(&as_free_buffer_queue));
 }
 
-pthread_cond_t as_consumer_thread_begin_cond = PTHREAD_COND_INITIALIZER;
-pthread_mutex_t as_consumer_thread_begin_mutex = PTHREAD_MUTEX_INITIALIZER;
-
 //
 //
 // TODO AS_BSOCK_PROXY - use as_buffers directly! (da sie tak?)
@@ -572,9 +556,6 @@ void *as_consumer_thread_loop(void *arg)
    // sd->clear_locking(); // TODO potrzebne?
 
    Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() START, sock: %p\n", my_thread_id(), sd);
-
-   // signal thread started
-   pthread_cond_signal(&as_consumer_thread_begin_cond);
 
    as_buffer_t *buffer = NULL;
 
@@ -606,6 +587,16 @@ void *as_consumer_thread_loop(void *arg)
          }
       }
       V(as_consumer_queue_lock);
+
+      if (as_dont_quit_consumer_thread_loop() == false)
+      {
+         if (buffer)
+         {
+            as_release_buffer(buffer);
+         }
+
+         return NULL;
+      }
 
       ASSERT(buffer);
       ASSERT(buffer->size > 0);
@@ -678,12 +669,6 @@ void *as_consumer_thread_loop(void *arg)
       ASSERT(buffer);
       as_release_buffer(buffer);
 
-#if 0
-      P(as_consumer_queue_lock);
-      Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() ITERATION END cons.q.size: %d\n", my_thread_id(), qsize(&as_consumer_buffer_queue));
-      V(as_consumer_queue_lock);
-#endif
-
       Pmsg1(50, "\t\t>>>> %4d as_consumer_thread_loop() ITERATION END\n", my_thread_id());
    }
 
@@ -728,17 +713,6 @@ void as_init_consumer_thread(BSOCK *sd)
       my_thread_id(), H(as_consumer_thread), sd);
 }
 
-void as_wait_consumer_thread_started()
-{
-   P(as_consumer_thread_begin_mutex);
-   while (as_dont_quit_consumer_thread_loop())
-   {
-      Pmsg1(50, "\t\t>>>> %4d as_wait_consumer_thread_started()\n", my_thread_id());
-      pthread_cond_wait(&as_consumer_thread_begin_cond, &as_consumer_thread_begin_mutex);
-   }
-   V(as_consumer_thread_begin_mutex);
-}
-
 void as_workqueue_init()
 {
    Pmsg1(50, "\t\t>>>> %4d as_workqueue_init()\n", my_thread_id());
@@ -765,7 +739,6 @@ void as_init(BSOCK *sd, uint32_t buf_size)
 	while (as_dont_quit_consumer_thread_loop() == false)
 	{}
 
-	// as_wait_consumer_thread_started();
 	as_workqueue_init();
 }
 
@@ -789,6 +762,7 @@ void as_request_consumer_thread_quit()
 
 void as_join_consumer_thread()
 {
+   pthread_cond_signal(&as_consumer_queue_cond);
    Pmsg1(50, "\t\t>>>> %4d as_join_consumer_thread()\n", my_thread_id());
 	pthread_join(as_consumer_thread, NULL);
 }
@@ -837,70 +811,6 @@ void as_dealloc_all_buffers()
    ASSERT(buffer_counter == AS_BUFFERS);
 }
 
-
-
-
-#if 0
-void as_release_remaining_consumer_buffers()
-{
-	as_buffer_t *buffer = NULL;
-
-
-   Pmsg1(50, "\t\t>>>> %4d as_release_remaining_consumer_buffers() START\n", my_thread_id());
-
-	do
-	{
-	   P(as_consumer_queue_lock);
-	   buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
-	   V(as_consumer_queue_lock);
-
-	   if (buffer != NULL)
-		{
-		   Pmsg2(50, "\t\t>>>> %4d as_release_remaining_consumer_buffers() buffer: %4d (%p)\n", my_thread_id(), buffer->id);
-
-		   P(as_buffer_lock);
-		   QINSERT(&as_free_buffer_queue, &buffer->bq);
-	      V(as_buffer_lock);
-		}
-	} while (buffer != NULL);
-
-	Pmsg1(50, "\t\t>>>> %4d as_release_remaining_consumer_buffers() END\n",
-      my_thread_id());
-
-
-	ASSERT(0 == qsize(&as_consumer_buffer_queue));
-}
-
-void as_clear_free_buffers_queue()
-{
-   // No need to lock anymore
-
-   Pmsg2(50, "\t\t>>>> %4d as_clear_free_buffers_queue() BEGIN, size %4d\n",
-      my_thread_id(), qsize(&as_free_buffer_queue));
-   ASSERT(AS_BUFFERS == qsize(&as_free_buffer_queue));
-
-   as_buffer_t *buffer = NULL;
-   int buffer_counter = 0;
-
-   do
-   {
-      buffer = (as_buffer_t *)QREMOVE(&as_free_buffer_queue);
-      if (buffer)
-      {
-         // Smart alloc does not allow free(NULL), which is inconsistent with how free works
-         free(buffer);
-         ++buffer_counter;
-      }
-   } while (buffer != NULL);
-
-   Pmsg2(50, "\t\t>>>> %4d as_clear_free_buffers_queue() END, size %4d\n",
-      my_thread_id(), qsize(&as_free_buffer_queue));
-
-   ASSERT(0 == qsize(&as_free_buffer_queue));
-   ASSERT(buffer_counter == AS_BUFFERS);
-}
-#endif
-
 void as_workqueue_destroy()
 {
    Pmsg1(50, "\t\t>>>> %4d as_workqueue_destroy()\n", my_thread_id());
@@ -916,11 +826,6 @@ void as_shutdown(BSOCK *sd)
 
    as_request_consumer_thread_quit();
    as_join_consumer_thread();
-
-
-//   as_release_remaining_consumer_buffers();
-//   as_clear_free_buffers_queue();
-
    as_dealloc_all_buffers();
 
    // Restore the pointer to the poolmem
