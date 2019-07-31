@@ -2,7 +2,7 @@
 #include "as_bsock_proxy.h"
 
 
-#define SOCK_BASE 1000
+#define SOCK_BASE 0
 pthread_mutex_t proxy_cnt_lock = PTHREAD_MUTEX_INITIALIZER;
 int proxy_cnt = 0;
 
@@ -31,8 +31,16 @@ void AS_BSOCK_PROXY::init()
 
 bool AS_BSOCK_PROXY::send()
 {
-   Pmsg4(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::send() msglen: %4d msg: %4d\n", my_thread_id(), id, msglen, H(msg));
+   Pmsg7(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::send() BEGIN buf: %d bufsize: %4d parent: %d msglen: %4d msg: %4d\n",
+	   my_thread_id(),
+	   id,
+	   as_buf ? as_buf->id : -1,
+	   as_buf ? as_buf->size : -1,
+	   as_buf ? (as_buf->parent ? as_buf->parent->id : -1) : -1,
+	   msglen,
+	   H(msg));
 
+   /* Nothing to send */
    if (msglen == 0)
    {
 	   return true;
@@ -43,7 +51,15 @@ bool AS_BSOCK_PROXY::send()
    {
       as_buf = as_acquire_buffer(NULL);
 
-//      Pmsg2(50, "\t\t>>>> %4d 1 as_buf: %p\n", my_thread_id(), as_buf);
+      Pmsg7(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::send() NULL BUF GET NEW buf: %d bufsize: %4d parent: %d msglen: %4d msg: %4d\n",
+   	   my_thread_id(),
+   	   id,
+   	   as_buf ? as_buf->id : -1,
+   	   as_buf ? as_buf->size : -1,
+   	   as_buf ? (as_buf->parent ? as_buf->parent->id : -1) : -1,
+   	   msglen,
+   	   H(msg));
+
       ASSERT(as_buf != NULL);
       ASSERT(as_buf->size == 0);
    }
@@ -53,17 +69,25 @@ bool AS_BSOCK_PROXY::send()
       /* Make sure the current buffer is marked for big file */
       as_buf->parent = this;
       as_consumer_enqueue_buffer(as_buf, false);
+
+      Pmsg7(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::send() WONT FIT GET NEW buf: %d bufsize: %4d parent: %d msglen: %4d msg: %4d\n",
+   	   my_thread_id(),
+   	   id,
+   	   as_buf ? as_buf->id : -1,
+   	   as_buf ? as_buf->size : -1,
+   	   as_buf ? (as_buf->parent ? as_buf->parent->id : -1) : -1,
+   	   msglen,
+   	   H(msg));
+
       /* Get a new one which is already marked */ // TODO <<< na pewno?
       as_buf = as_acquire_buffer(this);
-
-//      Pmsg2(50, "\t\t>>>> %4d 1 as_buf: %p\n", my_thread_id(), as_buf);
 
       ASSERT(as_buf != NULL);
       ASSERT(as_buf->size == 0);
    }
 
    ASSERT(as_buf != NULL);
-   ASSERT(as_buf->size <= AS_BUFFER_CAPACITY);
+   ASSERT(as_buf->size <= AS_BUFFER_CAPACITY - sizeof(msglen));
 
    /* Put the lenght of data first */
    memcpy(&as_buf->data[as_buf->size], &msglen, sizeof(msglen));
@@ -85,19 +109,38 @@ bool AS_BSOCK_PROXY::send()
    {
       /* Fill the current buffer */
       int32_t send_now = AS_BUFFER_CAPACITY - as_buf->size;
-      memcpy(&as_buf->data[as_buf->size], pos, send_now);
-      as_buf->size += send_now;
-      pos += send_now;
-      to_send -= send_now;
 
-      ASSERT(as_buf->size <= AS_BUFFER_CAPACITY);
-      ASSERT(pos <= msg + msglen);
+      if (send_now > 0)
+      {
+		  memcpy(&as_buf->data[as_buf->size], pos, send_now);
+		  as_buf->size += send_now;
+		  pos += send_now;
+		  to_send -= send_now;
 
-      /* Make sure the current buffer is marked for big file */
-      as_buf->parent = this;
+		  ASSERT(pos <= msg + msglen);
+
+		  /* Make sure the current buffer is marked for big file */
+		  as_buf->parent = this;
+      }
+      else
+      {
+    	  // msglen has already filled the buffer
+      }
+
+	  ASSERT(as_buf->size <= AS_BUFFER_CAPACITY);
+
       as_consumer_enqueue_buffer(as_buf, false);
       /* Get a new one which is already marked */
       as_buf = as_acquire_buffer(this);
+
+      Pmsg7(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::send() FULL GET NEW buf: %d bufsize: %4d parent: %d msglen: %4d msg: %4d\n",
+   	   my_thread_id(),
+   	   id,
+   	   as_buf ? as_buf->id : -1,
+   	   as_buf ? as_buf->size : -1,
+   	   as_buf ? (as_buf->parent ? as_buf->parent->id : -1) : -1,
+   	   msglen,
+   	   H(msg));
 
       ASSERT(as_buf != NULL);
       ASSERT(as_buf->size == 0);
@@ -110,6 +153,15 @@ bool AS_BSOCK_PROXY::send()
 
       ASSERT(as_buf->size <= AS_BUFFER_CAPACITY);
    }
+
+   Pmsg7(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::send() END buf: %d bufsize: %4d parent: %d msglen: %4d msg: %4d\n",
+	   my_thread_id(),
+	   id,
+	   as_buf ? as_buf->id : -1,
+	   as_buf ? as_buf->size : -1,
+	   as_buf ? (as_buf->parent ? as_buf->parent->id : -1) : -1,
+	   msglen,
+	   H(msg));
 
    return true;
 }

@@ -55,7 +55,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest, DIGES
 );
 
 bool encode_and_send_attributes(JCR *jcr, FF_PKT *ff_pkt, int &data_stream);
-static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &data_stream, AS_BSOCK_PROXY *sd);
+static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &data_stream, AS_BSOCK_PROXY *sd, int *);
 
 static bool crypto_session_start(JCR *jcr);
 static void crypto_session_end(JCR *jcr);
@@ -721,6 +721,8 @@ int as_save_file(
    int stat, data_stream; // AS async local only
    SIGNATURE *sig = NULL; // AS async local only
    int rtnstat = 0; // AS duplicate, local in both
+   int jcr_jobfiles = 0;
+
 
    Pmsg2(50, "\t\t\t>>>> %4d as_save_file() file: %s\n", my_thread_id(), ff_pkt->fname);
 
@@ -761,7 +763,7 @@ int as_save_file(
    /** Send attributes -- must be done after binit() */
    // AS TODO sprawdzić czy tu mają być jakieś mutexy
 #if AS_BACKUP
-   if (!encode_and_send_attributes_via_proxy(jcr, ff_pkt, data_stream, sd)) {
+   if (!encode_and_send_attributes_via_proxy(jcr, ff_pkt, data_stream, sd, &jcr_jobfiles)) {
 #else
    if (!encode_and_send_attributes(jcr, ff_pkt, data_stream)) {
 #endif
@@ -926,9 +928,11 @@ int as_save_file(
 
          Dmsg1(300, "Saving Finder Info for \"%s\"\n", ff_pkt->fname);
 
+#if 0
          JCR_P
 		 int jcr_jobfiles = jcr->JobFiles;
          JCR_V
+#endif
 
          sd->fsend("%ld %d 0", jcr_jobfiles, STREAM_HFSPLUS_ATTRIBUTES);
 
@@ -1044,9 +1048,12 @@ int as_save_file(
       }
 
       /** Send our header */
+#if 0
       JCR_P
 	  int jcr_jobfiles = jcr->JobFiles;
 	  JCR_V
+#endif
+
 	  sd->fsend("%ld %ld 0", jcr_jobfiles, STREAM_SIGNED_DIGEST);
       Dmsg1(300, "bfiled>stored:header %s\n", sd->msg);
 
@@ -1066,9 +1073,11 @@ int as_save_file(
    if (digest) {
       uint32_t size;
 
+#if 0
       JCR_P
 	  int jcr_jobfiles = jcr->JobFiles;
 	  JCR_V
+#endif
 
       sd->fsend("%ld %d 0", jcr_jobfiles, digest_stream);
       Dmsg1(300, "bfiled>stored:header %s\n", sd->msg);
@@ -1103,9 +1112,11 @@ int as_save_file(
    if (ff_pkt->type == FT_LNKSAVED && ff_pkt->digest) {
       Dmsg2(300, "Link %s digest %d\n", ff_pkt->fname, ff_pkt->digest_len);
 
+#if 0
       JCR_P
 	  int jcr_jobfiles = jcr->JobFiles;
 	  JCR_V
+#endif
 
       sd->fsend("%ld %d 0", jcr_jobfiles, ff_pkt->digest_stream);
 
@@ -1826,7 +1837,7 @@ bool encode_and_send_attributes(JCR *jcr, FF_PKT *ff_pkt, int &data_stream)
    return stat;
 }
 
-static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &data_stream, AS_BSOCK_PROXY *sd)
+static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &data_stream, AS_BSOCK_PROXY *sd, int *jcr_jobfiles)
 {
    char attribs[MAXSTRING];
    char attribsExBuf[MAXSTRING];
@@ -1869,6 +1880,7 @@ static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &
    ff_pkt->FileIndex = jcr->JobFiles;  /* return FileIndex */
    pm_strcpy(jcr->last_fname, ff_pkt->fname);
    jcr_jobfiles_snapshot = jcr->JobFiles;
+   *jcr_jobfiles = jcr_jobfiles_snapshot;
    jcr->unlock();
 
    /* Debug code: check if we must hangup */

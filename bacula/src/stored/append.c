@@ -48,16 +48,24 @@ bool do_append_data(JCR *jcr)
    if (!dcr) {
       pm_strcpy(jcr->errmsg, _("DCR is NULL!!!\n"));
       Jmsg0(jcr, M_FATAL, 0, jcr->errmsg);
+
+      Pmsg0(50, "\t\t\t!!!! DCR is NULL!!!\n");
+
       return false;
    }
    dev = dcr->dev;
    if (!dev) {
       pm_strcpy(jcr->errmsg, _("DEVICE is NULL!!!\n"));
       Jmsg0(jcr, M_FATAL, 0, jcr->errmsg);
+
+      Pmsg0(50, "\t\t\t!!!! DEVICE is NULL!!!\n");
+
       return false;
    }
 
    Dmsg1(100, "Start append data. res=%d\n", dev->num_reserved());
+
+   Pmsg1(50, "\t\t\t!!!! Start append data. res=%d\n", dev->num_reserved());
 
    memset(&rec, 0, sizeof(rec));
 
@@ -65,6 +73,9 @@ bool do_append_data(JCR *jcr)
       jcr->setJobStatus(JS_ErrorTerminated);
       pm_strcpy(jcr->errmsg, _("Unable to set network buffer size.\n"));
       Jmsg0(jcr, M_FATAL, 0, jcr->errmsg);
+
+      Pmsg0(50, "\t\t\t!!!! Unable to set network buffer size.\n");
+
       return false;
    }
 
@@ -78,8 +89,12 @@ bool do_append_data(JCR *jcr)
    //ASSERT(dev->VolCatInfo.VolCatName[0]);
    if (dev->VolCatInfo.VolCatName[0] == 0) {
       Pmsg0(000, _("NULL Volume name. This shouldn't happen!!!\n"));
+
+      Pmsg0(50, "\t\t\t!!!! NULL Volume name. This shouldn't happen!!!\n");
    }
    Dmsg1(50, "Begin append device=%s\n", dev->print_name());
+
+   Pmsg1(50, "\t\t\t!!!! Begin append device=%s\n", dev->print_name());
 
    begin_data_spool(dcr);
    begin_attribute_spool(jcr);
@@ -88,6 +103,8 @@ bool do_append_data(JCR *jcr)
    //ASSERT(dev->VolCatInfo.VolCatName[0]);
    if (dev->VolCatInfo.VolCatName[0] == 0) {
       Pmsg0(000, _("NULL Volume name. This shouldn't happen!!!\n"));
+
+      Pmsg0(50, "\t\t\t!!!! NULL Volume name. This shouldn't happen!!!\n");
    }
    /*
     * Write Begin Session Record
@@ -96,11 +113,16 @@ bool do_append_data(JCR *jcr)
       Jmsg1(jcr, M_FATAL, 0, _("Write session label failed. ERR=%s\n"),
          dev->bstrerror());
       jcr->setJobStatus(JS_ErrorTerminated);
+
+      Pmsg1(50, "\t\t\t!!!! Write session label failed. ERR=%s\n", dev->bstrerror());
+
       ok = false;
    }
    //ASSERT(dev->VolCatInfo.VolCatName[0]);
    if (dev->VolCatInfo.VolCatName[0] == 0) {
       Pmsg0(000, _("NULL Volume name. This shouldn't happen!!!\n"));
+
+      Pmsg0(50, "\t\t\t!!!! NULL Volume name. This shouldn't happen!!!\n");
    }
 
    /* Tell File daemon to send data */
@@ -108,6 +130,9 @@ bool do_append_data(JCR *jcr)
       berrno be;
       Jmsg1(jcr, M_FATAL, 0, _("Network send error to FD. ERR=%s\n"),
             be.bstrerror(fd->b_errno));
+
+      Pmsg1(50, "\t\t\t!!!! Network send error to FD. ERR=%s\n", be.bstrerror(fd->b_errno));
+
       ok = false;
    }
 
@@ -143,16 +168,25 @@ bool do_append_data(JCR *jcr)
      if ((n=bget_msg(fd)) <= 0) {
          if (n == BNET_SIGNAL && fd->msglen == BNET_EOD) {
             Dmsg0(200, "Got EOD on reading header.\n");
+
+            Pmsg0(50, "\t\t\t!!!! Got EOD on reading header.\n");
+
             break;                    /* end of data */
          }
          Jmsg3(jcr, M_FATAL, 0, _("Error reading data header from FD. n=%d msglen=%d ERR=%s\n"),
                n, fd->msglen, fd->bstrerror());
+
+         Pmsg3(50, "\t\t\t!!!! Error reading data header from FD. n=%d msglen=%d ERR=%s\n", n, fd->msglen, fd->bstrerror());
+
          ok = false;
          break;
       }
 
       if (sscanf(fd->msg, "%ld %ld %lld", &file_index, &stream, &stream_len) != 3) {
          Jmsg1(jcr, M_FATAL, 0, _("Malformed data header from FD: %s\n"), fd->msg);
+
+         Pmsg1(50, "\t\t\t!!!! Malformed data header from FD: %s\n", fd->msg);
+
          ok = false;
          break;
       }
@@ -160,8 +194,11 @@ bool do_append_data(JCR *jcr)
       Dmsg3(890, "<filed: Header FilInx=%d stream=%d stream_len=%lld\n",
          file_index, stream, stream_len);
 
+      Pmsg3(50, "\t\t\t!!!! <filed: Header FilInx=%d stream=%d stream_len=%lld\n",
+         file_index, stream, stream_len);
+
       // KLIS
-      Pmsg1(50, "\t\t>>>> APPEND last_file_index: %d\n", last_file_index);
+      Pmsg1(50, "\t\t!!!! APPEND last_file_index: %d\n", last_file_index);
 
       /*
        * We make sure the file_index is advancing sequentially.
@@ -170,11 +207,13 @@ bool do_append_data(JCR *jcr)
          goto fi_checked;
       }
       Dmsg2(400, "file_index=%d last_file_index=%d\n", file_index, last_file_index);
+
+      Pmsg2(50, "\t\t\t!!!! file_index=%d last_file_index=%d\n", file_index, last_file_index);
+
       if (file_index > 0 && (file_index == last_file_index ||
           file_index == last_file_index + 1)) {
          goto fi_checked;
       }
-
 
      // TODO KLIS file indexes not coming in order right now
 #if 0
@@ -208,10 +247,19 @@ fi_checked:
             stream_to_ascii(buf1, rec.Stream,rec.FileIndex),
             rec.data_len);
 
+         Pmsg4(50, "\t\t\t!!!! before writ_rec FI=%d SessId=%d Strm=%s len=%d\n",
+            rec.FileIndex, rec.VolSessionId,
+            stream_to_ascii(buf1, rec.Stream,rec.FileIndex),
+            rec.data_len);
+
          ok = dcr->write_record(&rec);
          if (!ok) {
             Dmsg2(90, "Got write_block_to_dev error on device %s. %s\n",
                   dcr->dev->print_name(), dcr->dev->bstrerror());
+
+            Pmsg2(50, "\t\t\t!!!! Got write_block_to_dev error on device %s. %s\n",
+                  dcr->dev->print_name(), dcr->dev->bstrerror());
+
             break;
          }
          jcr->JobBytes += rec.data_len;   /* increment bytes this job */
@@ -219,14 +267,26 @@ fi_checked:
             FI_to_ascii(buf1, rec.FileIndex), rec.VolSessionId,
             stream_to_ascii(buf2, rec.Stream, rec.FileIndex), rec.data_len);
 
+         Pmsg4(50, "\t\t\t!!!! write_record FI=%s SessId=%d Strm=%s len=%d\n",
+            FI_to_ascii(buf1, rec.FileIndex), rec.VolSessionId,
+            stream_to_ascii(buf2, rec.Stream, rec.FileIndex), rec.data_len);
+
+
          send_attrs_to_dir(jcr, &rec);
          Dmsg0(650, "Enter bnet_get\n");
+
+         Pmsg0(50, "\t\t\t!!!! Enter bnet_get\n");
       }
       Dmsg2(650, "End read loop with FD. JobFiles=%d Stat=%d\n", jcr->JobFiles, n);
+
+      Pmsg2(50, "\t\t\t!!!! End read loop with FD. JobFiles=%d Stat=%d\n", jcr->JobFiles, n);
 
       if (fd->is_error()) {
          if (!jcr->is_job_canceled()) {
             Dmsg1(350, "Network read error from FD. ERR=%s\n", fd->bstrerror());
+
+            Pmsg1(50, "\t\t\t!!!! Network read error from FD. ERR=%s\n", fd->bstrerror());
+
             Jmsg1(jcr, M_FATAL, 0, _("Network error reading from FD. ERR=%s\n"),
                   fd->bstrerror());
          }
@@ -248,6 +308,8 @@ fi_checked:
 
    Dmsg1(200, "Write EOS label JobStatus=%c\n", jcr->JobStatus);
 
+   Pmsg1(200, "\t\t\t!!!! Write EOS label JobStatus=%c\n", jcr->JobStatus);
+
    /*
     * Check if we can still write. This may not be the case
     *  if we are at the end of the tape or we got a fatal I/O error.
@@ -258,6 +320,8 @@ fi_checked:
          if (ok && !jcr->is_job_canceled()) {
             Jmsg1(jcr, M_FATAL, 0, _("Error writing end session label. ERR=%s\n"),
                   dev->bstrerror());
+
+            Pmsg1(50, "\t\t\t!!!! Error writing end session label. ERR=%s\n", dev->bstrerror());
          }
          jcr->setJobStatus(JS_ErrorTerminated);
          ok = false;
@@ -269,6 +333,8 @@ fi_checked:
             Jmsg2(jcr, M_FATAL, 0, _("Fatal append error on device %s: ERR=%s\n"),
                   dev->print_name(), dev->bstrerror());
             Dmsg0(100, _("Set ok=FALSE after write_block_to_device.\n"));
+
+            Pmsg0(50, "\t\t\t!!!! Set ok=FALSE after write_block_to_device.\n");
          }
          jcr->setJobStatus(JS_ErrorTerminated);
          ok = false;
@@ -311,6 +377,9 @@ fi_checked:
    jcr->sendJobStatus();          /* update director */
 
    Dmsg1(100, "return from do_append_data() ok=%d\n", ok);
+
+   Pmsg1(50, "\t\t\t!!!! return from do_append_data() ok=%d\n", ok);
+
    return ok;
 }
 
