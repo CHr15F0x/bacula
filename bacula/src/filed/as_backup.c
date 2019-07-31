@@ -13,26 +13,6 @@
 
 
 
-#define STAMP_SIZE 64 // Unused
-
-int stamp_ok(as_buffer_t *buf) // Unused
-{
-	char *start = &buf->data[AS_BUFFER_CAPACITY];
-
-	for (int i = 0; i < STAMP_SIZE; ++i)
-	{
-		if ((unsigned char)start[i] != (unsigned char)0xAA)
-		{
-			return 0;
-		}
-	}
-
-	return 1;
-}
-
-#define CHECK_STAMP(BUF) ASSERT(stamp_ok(BUF));
-
-
 int my_thread_id()
 {
    return H(pthread_self());
@@ -78,6 +58,7 @@ static BQUEUE as_consumer_buffer_queue =
 
 static AS_BSOCK_PROXY *as_bigfile_bsock_proxy = NULL;
 
+static as_buffer_t *as_bigfile_buffer_only = NULL;
 
 
 //
@@ -101,7 +82,7 @@ static BQUEUE as_free_buffer_queue =
 
 as_buffer_t *as_acquire_buffer(AS_BSOCK_PROXY *parent)
 {
-   Pmsg2(50, "\t\t>>>> %4d as_acquire_buffer() BEGIN parent: %4d\n",
+   Pmsg2(50, "\t\t\t>>>> %4d as_acquire_buffer() BEGIN parent: %4d\n",
       my_thread_id(), parent ? parent->id : -1);
 
    as_buffer_t *buffer = NULL;
@@ -112,15 +93,23 @@ as_buffer_t *as_acquire_buffer(AS_BSOCK_PROXY *parent)
    //while (as_workqueue_engine_quit() == false) // TODO check for quit << to nie dzia�a trzeba jako� inaczej sprawdzac
    while (1) // TODO check for quit
    {
-      buffer = (as_buffer_t *)QREMOVE(&as_free_buffer_queue);
+      if ((as_bigfile_bsock_proxy != NULL) && (as_bigfile_bsock_proxy == parent))
+      {
+         buffer = as_bigfile_buffer_only; // Can already be null
+         as_bigfile_buffer_only = NULL;
+      }
+      else
+      {
+         buffer = (as_buffer_t *)QREMOVE(&as_free_buffer_queue);
+      }
 
       if (buffer)
       {
          buffer->parent = parent;
          buffer->size = 0;
 
-         Pmsg3(50, "\t\t>>>> %4d as_acquire_buffer() END parent: %4d, free size: %d \n",
-            my_thread_id(), parent ? parent->id : -1, qsize(&as_free_buffer_queue));
+         Pmsg4(50, "\t\t>>>> %4d as_acquire_buffer() END parent: %4d, free size: %d, buf: %d\n",
+            my_thread_id(), parent ? parent->id : -1, qsize(&as_free_buffer_queue), buffer->id);
          break;
       }
       else
@@ -211,7 +200,7 @@ void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
 	   QINSERT(&as_consumer_buffer_queue, &buffer->bq);
 	}
 
-    Pmsg5(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d (%p), END bigfile: %, cons.q.size: %d\n",
+    Pmsg5(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d (%p), END bigfile: %d, cons.q.size: %d\n",
        my_thread_id(), buffer->id, buffer, as_bigfile_bsock_proxy ? as_bigfile_bsock_proxy->id : -1,
        qsize(&as_consumer_buffer_queue));
 
@@ -531,10 +520,17 @@ void as_release_buffer(as_buffer_t *buffer)
    int id; // For testing
    AS_BSOCK_PROXY *parent; /** Only set when a total file trasfer size is bigger than one buffer */
 #endif
-   QINSERT(&as_free_buffer_queue, &buffer->bq);
+
+   if (as_bigfile_buffer_only == NULL)
+   {
+      as_bigfile_buffer_only = buffer;
+   }
+   else
+   {
+      QINSERT(&as_free_buffer_queue, &buffer->bq);
+   }
 
    V(as_buffer_lock);
-
 
    pthread_cond_broadcast(&as_buffer_cond);
 
@@ -573,6 +569,59 @@ void *as_consumer_thread_loop(void *arg)
 
       while (as_dont_quit_consumer_thread_loop())
       {
+         // Peek at the first element
+         buffer = (as_buffer_t *)qnext(&as_consumer_buffer_queue, NULL);
+         // Check if we are in the middle of sending a big file
+         if (as_bigfile_bsock_proxy != NULL)
+         // in the middle of a Big file
+         {
+            if (buffer->parent == as_bigfile_bsock_proxy)
+            {
+               // Only get a buffer if it is a continuation of a big file
+               buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
+               if (buffer)
+               {
+               Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE BIGFILE buf: %d (%p) bufsize: %d parent: %d, cons.q.size: %d\n",
+                  my_thread_id(), buffer->id, buffer, buffer->size, buffer->parent ? buffer->parent->id : -1, qsize(&as_consumer_buffer_queue));
+                  break;
+               }
+               else
+               {
+                  // should not happen
+                  //cond wait
+               }
+            }
+            else
+            {
+               //cond wait
+            }
+         }
+         // No big file currently served
+         else
+         {
+            if (buffer)
+            {
+               // Get the buffer from the queue
+               buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
+               if (buffer)
+               {
+               Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: %d (%p) bufsize: %d parent: %d, cons.q.size: %d\n",
+                  my_thread_id(), buffer->id, buffer, buffer->size, buffer->parent ? buffer->parent->id : -1, qsize(&as_consumer_buffer_queue));
+                  break;
+               }
+               else
+               {
+                  // should not happen
+                  //cond wait
+               }
+            }
+            else
+            {
+               //cond wait
+            }
+         }
+
+#if 0
          buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
          if (buffer)
          {
@@ -581,6 +630,7 @@ void *as_consumer_thread_loop(void *arg)
             break;
          }
          else
+#endif
          {
          	Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: WAIT, cons.q.size: %d\n", my_thread_id(), qsize(&as_consumer_buffer_queue));
             pthread_cond_wait(&as_consumer_queue_cond, &as_consumer_queue_lock);
@@ -692,15 +742,17 @@ void as_init_free_buffers_queue()
 
    for (int i = 0; i < AS_BUFFERS; ++i)
    {
-      buffer = (as_buffer_t *)malloc(sizeof(as_buffer_t) + STAMP_SIZE); // REMOVE STAMP
-      start = &buffer->data[AS_BUFFER_CAPACITY]; // Unused
-      memset(start, 0xAA, STAMP_SIZE); // Unused
-
+      buffer = (as_buffer_t *)malloc(sizeof(as_buffer_t));
       buffer->id = AS_BUFFER_BASE + i;
       QINSERT(&as_free_buffer_queue, &buffer->bq);
    }
 
    ASSERT(AS_BUFFERS == qsize(&as_free_buffer_queue));
+
+   as_bigfile_buffer_only = (as_buffer_t *)malloc(sizeof(as_buffer_t));
+   as_bigfile_buffer_only->id = AS_BUFFER_BASE + 999;
+
+   ASSERT(as_bigfile_buffer_only != NULL);
 }
 
 void as_init_consumer_thread(BSOCK *sd)
@@ -802,6 +854,14 @@ void as_dealloc_all_buffers()
          ++buffer_counter;
       }
    } while (buffer != NULL);
+
+   if (as_bigfile_buffer_only)
+   {
+      Pmsg3(50, "\t\t>>>> %4d as_dealloc_all_buffers() BIG buffer: %d (%p)\n",
+         my_thread_id(), as_bigfile_buffer_only->id, as_bigfile_buffer_only);
+
+      free(as_bigfile_buffer_only);
+   }
 
    Pmsg3(50, "\t\t>>>> %4d as_dealloc_all_buffers() END, free size %4d consumer size %4d\n",
       my_thread_id(), qsize(&as_free_buffer_queue), qsize(&as_consumer_buffer_queue));

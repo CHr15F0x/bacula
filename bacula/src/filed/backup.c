@@ -333,6 +333,8 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
 
    crypto_session_end(jcr);
 
+   Pmsg5(50, "\t\t\t>>>> %4d end blast_data ok=%d ,sock: %p msg: %p msglen: %d\n",
+      my_thread_id(), ok, sd, sd->msg, sd->msglen);
 
    Dmsg1(100, "end blast_data ok=%d\n", ok);
 
@@ -1026,7 +1028,7 @@ int as_save_file(
       }
 
 
-      // TODO muteks?? jcr->crypto.pki_keypair lub jcr->crypto per w¹tek???
+      // TODO muteks?? jcr->crypto.pki_keypair lub jcr->crypto per wï¿½tek???
       JCR_P
       if (!crypto_sign_add_signer(sig, signing_digest, jcr->crypto.pki_keypair)) {
          Jmsg(jcr, M_FATAL, 0, _("An error occurred while adding signer the stream.\n"));
@@ -1239,7 +1241,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
 
    Dmsg1(300, "Saving data, type=%d\n", ff_pkt->type);
 
-   // TODO obs³uga kompresji - bufor per w¹tek
+   // TODO obsï¿½uga kompresji - bufor per wï¿½tek
 #if defined(HAVE_LIBZ) || defined(HAVE_LZO)
    uLong compress_len = 0;
    uLong max_compress_len = 0;
@@ -1318,7 +1320,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
          goto err;
       }
       /** Allocate the cipher context */
-      // TODO powielic per w¹tek
+      // TODO powielic per wï¿½tek
       if ((cipher_ctx = crypto_cipher_new(jcr->crypto.pki_session, true,
            &cipher_block_size)) == NULL) {
          /* Shouldn't happen! */
