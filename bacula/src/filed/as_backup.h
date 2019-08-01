@@ -71,6 +71,7 @@ struct as_buffer_t
    int32_t size;
    int id; // For testing
    AS_BSOCK_PROXY *parent; /** Only set when a total file trasfer size is bigger than one buffer */
+   int final;
 };
 
 //

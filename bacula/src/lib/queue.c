@@ -182,3 +182,28 @@ void qinsert_after(BQUEUE *qhead, BQUEUE *after, BQUEUE *object)
 #undef aft
 #undef obj
 }
+
+/*  QPREV   --   Return previous item from the queue
+ *               returns NULL at the head of the queue.
+ *               If qitem is NULL, the last item from
+ *               the queue is returned.
+ */
+
+BQUEUE *qprev(BQUEUE *qhead, BQUEUE *qitem)
+{
+#define qh ((BQUEUE *)qhead)
+#define qi ((BQUEUE *)qitem)
+
+        BQUEUE *object;
+
+        if (qi == NULL)
+           qitem = qhead;
+        ASSERT(qi->qprev->qnext == qi);
+        ASSERT(qi->qnext->qprev == qi);
+
+        if ((object = qi->qprev) == qh)
+           return NULL;
+        return object;
+#undef qh
+#undef qi
+}

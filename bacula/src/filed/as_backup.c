@@ -215,7 +215,7 @@ void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
 
       do
       {
-         last = (as_buffer_t *)qnext(&as_consumer_buffer_queue, last ? &last->bq : NULL);
+         last = (as_buffer_t *)qprev(&as_consumer_buffer_queue, last ? &last->bq : NULL);
 
          if ((last != NULL) && (last->parent == as_bigfile_bsock_proxy))
          {
@@ -232,6 +232,12 @@ void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
          my_thread_id(), last ? last->id : -1, last);
 #endif
 
+      if (finalize)
+      {
+         // This was the last buffer for this big file
+         buffer->final = finalize;
+      }
+
       // Buffers for this big file can have already been sent or this is the first one
       // ,then put this buffer at the beginning of the queue
       if (last == NULL)
@@ -243,12 +249,6 @@ void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
       {
          qinsert_after(&as_consumer_buffer_queue, &last->bq, &buffer->bq);
       }
-
-      if (finalize)
-      {
-         // This was the last buffer for this big file
-         as_bigfile_bsock_proxy = NULL;
-      }
 	}
 	else // as_bigfile_bsock_proxy != buffer->parent
 	{
@@ -259,6 +259,27 @@ void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
 #endif
 
 	   QINSERT(&as_consumer_buffer_queue, &buffer->bq);
+
+	   // put this chunk just after the last chunk of any bigfile in this queue
+
+      // Find the last buffer in the queue which belongs to a big file
+      as_buffer_t *last = NULL;
+
+      do
+      {
+         last = (as_buffer_t *)qprev(&as_consumer_buffer_queue, last ? &last->bq : NULL);
+
+         if ((last != NULL) && (last->parent != NULL))
+         {
+#if KLDEBUG_CONS_ENQUEUE
+            Pmsg3(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() last: %d (%p)\n",
+                my_thread_id(), last->id, last);
+#endif
+            break;
+         }
+      } while (last != NULL);
+
+
 	}
 
 #if KLDEBUG_CONS_ENQUEUE
@@ -569,6 +590,7 @@ void as_release_buffer(as_buffer_t *buffer)
 
    buffer->size = 0;
    buffer->parent = NULL;
+   buffer->final = 0;
 #if 0
    BQUEUE bq;
    char data[AS_BUFFER_CAPACITY];
@@ -652,6 +674,12 @@ void *as_consumer_thread_loop(void *arg)
                      Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE BIGFILE buf: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
                      my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
    #endif
+
+                     if (buffer->final)
+                     {
+                        // This was the last one
+                        as_bigfile_bsock_proxy = NULL;
+                     }
 
                      break;
                   }
