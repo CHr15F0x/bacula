@@ -83,7 +83,7 @@ static void close_vss_backup_session(JCR *jcr);
 
 
 
-
+#define KLDEBUG 0
 
 
 
@@ -110,11 +110,10 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
 
    sd = jcr->store_bsock;
 
-//   Pmsg5(50, "\t\t\t>>>> %4d blast_data_to_storage_daemon() sock: %p msg: %p msglen: %d sizeof: %d\n",
-//      my_thread_id(), sd, sd->msg, sd->msglen, sizeof_pool_memory(sd->msg));
-
+#if KLDEBUG
    Pmsg4(50, "\t\t\t>>>> %4d blast_data_to_storage_daemon() sock: %p msg: %p msglen: %d\n",
       my_thread_id(), sd, sd->msg, sd->msglen);
+#endif
 
    jcr->setJobStatus(JS_Running);
 
@@ -222,17 +221,17 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
    }
 
 
-   //Pmsg5(50, "\t\t\t>>>> %4d BEFORE as_init() sock: %p msg: %p msglen: %d sizeof: %d\n",
-   //   my_thread_id(), sd, sd->msg, sd->msglen, sizeof_pool_memory(sd->msg));
-
+#if KLDEBUG
    Pmsg4(50, "\t\t\t>>>> %4d BEFORE as_init() sock: %p msg: %p msglen: %d\n",
       my_thread_id(), sd, sd->msg, sd->msglen);
+#endif
+
 
    // job thread may still be send()ing data while as_init() may trigger yet another send
    // Czy to jest potrzebne???
    // sm_check(__FILE__, __LINE__, true);
 
-//   sd->set_locking(); TODO potrzebne???
+   sd->set_locking(); // TODO potrzebne???
 
 
 
@@ -263,11 +262,12 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
    // Moved to the start of consumer thread
    // sd->clear_locking();
 
-   //Pmsg5(50, "\t\t\t>>>> %4d AFTER as_shutdown() sock: %p msg: %p msglen: %d sizeof: %d\n",
-   //   my_thread_id(), sd, sd->msg, sd->msglen, sizeof_pool_memory(sd->msg));
 
+#if KLDEBUG
    Pmsg4(50, "\t\t\t>>>> %4d AFTER as_shutdown() sock: %p msg: %p msglen: %d\n",
       my_thread_id(), sd, sd->msg, sd->msglen);
+#endif
+
 
    if (have_acl && jcr->acl_data->u.build->nr_errors > 0) {
       Jmsg(jcr, M_WARNING, 0, _("Encountered %ld acl errors while doing backup\n"),
@@ -284,18 +284,20 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
 
    stop_heartbeat_monitor(jcr);
 
-   //Pmsg5(50, "\t\t\t>>>> %4d BEFORE last signal, sock: %p msg: %p msglen: %d sizeof: %d\n",
-   //   my_thread_id(), sd, sd->msg, sd->msglen, sizeof_pool_memory(sd->msg));
 
+#if KLDEBUG
    Pmsg4(50, "\t\t\t>>>> %4d BEFORE last signal, sock: %p msg: %p msglen: %d\n",
       my_thread_id(), sd, sd->msg, sd->msglen);
+#endif
 
-//   print_memory_pool_stats();
 
    sd->signal(BNET_EOD);            /* end of sending data */
 
+
+#if KLDEBUG
    Pmsg4(50, "\t\t\t>>>> %4d AFTER last signal, sock: %p msg: %p msglen: %d\n",
       my_thread_id(), sd, sd->msg, sd->msglen);
+#endif
 
 
    if (have_acl && jcr->acl_data) {
@@ -333,8 +335,11 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
 
    crypto_session_end(jcr);
 
+#if KLDEBUG
    Pmsg5(50, "\t\t\t>>>> %4d end blast_data ok=%d ,sock: %p msg: %p msglen: %d\n",
       my_thread_id(), ok, sd, sd->msg, sd->msglen);
+#endif
+
 
    Dmsg1(100, "end blast_data ok=%d\n", ok);
 
@@ -444,7 +449,11 @@ int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level)
    int digest_stream = STREAM_NONE; // AS both, passed via ctxt
    bool has_file_data = false; // AS both, passed via ctxt
 
+
+#if KLDEBUG
    Pmsg2(50, "\t\t\t>>>> %4d save_file() file: %s\n", my_thread_id(), ff_pkt->fname);
+#endif
+
 
    int rtnstat = 0; // AS duplicate, local in both
    struct save_pkt sp;          /* use by option plugin */   // AS save_file
@@ -726,7 +735,10 @@ int as_save_file(
    int jcr_jobfiles = 0;
 
 
+#if KLDEBUG
    Pmsg2(50, "\t\t\t>>>> %4d as_save_file() file: %s\n", my_thread_id(), ff_pkt->fname);
+#endif
+
 
 #if AS_BACKUP
    AS_BSOCK_PROXY proxy;

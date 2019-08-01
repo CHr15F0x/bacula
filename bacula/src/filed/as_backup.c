@@ -12,6 +12,11 @@
 
 
 
+#define KLDEBUG 0
+#define KLDEBUG_LOOP 0
+#define KLDEBUG_CONS_ENQUEUE 1
+
+
 
 int my_thread_id()
 {
@@ -57,8 +62,8 @@ static BQUEUE as_consumer_buffer_queue =
 };
 
 static AS_BSOCK_PROXY *as_bigfile_bsock_proxy = NULL;
-
 static as_buffer_t *as_bigfile_buffer_only = NULL;
+
 
 
 //
@@ -82,24 +87,27 @@ static BQUEUE as_free_buffer_queue =
 
 as_buffer_t *as_acquire_buffer(AS_BSOCK_PROXY *parent)
 {
+#if KLDEBUG
    Pmsg2(50, "\t\t>>>> %4d as_acquire_buffer() BEGIN parent: %4X\n",
       my_thread_id(), HH(parent));
+#endif
 
    as_buffer_t *buffer = NULL;
 
    /** Wait for a buffer to become available */
-   // while (as_workqueue_engine_quit() == false) // cancel if job canceled
    P(as_buffer_lock);
-   //while (as_workqueue_engine_quit() == false) // TODO check for quit << to nie dzia�a trzeba jako� inaczej sprawdzac
    while (1) // TODO check for quit
    {
+      P(as_consumer_queue_lock);
       if ((as_bigfile_bsock_proxy != NULL) && (as_bigfile_bsock_proxy == parent))
       {
          buffer = as_bigfile_buffer_only; // Can already be null
          as_bigfile_buffer_only = NULL;
+         V(as_consumer_queue_lock);
       }
       else
       {
+         V(as_consumer_queue_lock);
          buffer = (as_buffer_t *)QREMOVE(&as_free_buffer_queue);
       }
 
@@ -108,16 +116,28 @@ as_buffer_t *as_acquire_buffer(AS_BSOCK_PROXY *parent)
          buffer->parent = parent;
          buffer->size = 0;
 
+#if KLDEBUG
          Pmsg4(50, "\t\t>>>> %4d as_acquire_buffer() END parent: %4X, free size: %d, buf: %d\n",
             my_thread_id(), HH(parent), qsize(&as_free_buffer_queue), buffer->id);
+#endif
+
          break;
       }
       else
       {
-         Pmsg3(50, "\t\t>>>> %4d as_acquire_buffer() WAIT parent: %4X, free size: %d \n",
-            my_thread_id(), HH(parent), qsize(&as_free_buffer_queue));
 
-         pthread_cond_wait(&as_buffer_cond, &as_buffer_lock); // timed wait? because of while (1)
+#if KLDEBUG
+         P(as_consumer_queue_lock);
+         Pmsg4(50, "\t\t>>>> %4d as_acquire_buffer() WAIT as_bigfile_bsock_proxy: %4X parent: %4X, free size: %d \n",
+            my_thread_id(), HH(as_bigfile_bsock_proxy), HH(parent), qsize(&as_free_buffer_queue));
+         V(as_consumer_queue_lock);
+#endif
+
+         struct timespec abs_time;
+         clock_gettime(CLOCK_REALTIME, &abs_time);
+         abs_time.tv_sec += 1;
+
+         pthread_cond_timedwait(&as_buffer_cond, &as_buffer_lock, &abs_time);
       }
    }
    V(as_buffer_lock);
@@ -129,30 +149,65 @@ as_buffer_t *as_acquire_buffer(AS_BSOCK_PROXY *parent)
    return buffer;
 }
 
+void dump_consumer_queue()
+{
+#if KLDEBUG_CONS_ENQUEUE
+
+   as_buffer_t *buffer = (as_buffer_t *)qnext(&as_consumer_buffer_queue, NULL);
+
+   int cnt = 0;
+
+   while (buffer)
+   {
+      Pmsg6(50, "\t\t>>>> %4d CONSUMER_Q[%d] %d (%p) parent: %4X, curr_bigfile: %4X\n",
+         my_thread_id(), cnt, buffer->id, buffer, buffer ? HH(buffer->parent) : 0, HH(as_bigfile_bsock_proxy));
+
+      buffer = (as_buffer_t *)qnext(&as_consumer_buffer_queue, &buffer->bq);
+      ++cnt;
+   }
+#endif
+}
+
 void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
 {
 	P(as_consumer_queue_lock);
 
+#if KLDEBUG_CONS_ENQUEUE
     Pmsg5(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d (%p), BEGIN bigfile: %4X, cons.q.size: %d\n",
        my_thread_id(), buffer->id, buffer, HH(as_bigfile_bsock_proxy),
        qsize(&as_consumer_buffer_queue));
+    dump_consumer_queue();
+#endif
 
 	if (as_bigfile_bsock_proxy == NULL)
 	{
 	   as_bigfile_bsock_proxy = buffer->parent;
 
-      Pmsg5(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d (%p), NEW bigfile: %4X, cons.q.size: %d\n",
+#if KLDEBUG_CONS_ENQUEUE
+	   Pmsg5(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d (%p), NEW   bigfile: %4X, cons.q.size: %d\n",
          my_thread_id(), buffer->id, buffer, HH(as_bigfile_bsock_proxy),
          qsize(&as_consumer_buffer_queue));
+#endif
 
-	   QINSERT(&as_consumer_buffer_queue, &buffer->bq);
+	   if (as_bigfile_bsock_proxy != NULL)
+	   {
+	      // Push the first chunk of the first big file at the beginning
+	      qinsert_after(&as_consumer_buffer_queue, NULL, &buffer->bq);
+	   }
+	   else
+	   {
+	      // Ordinary small file - at the end
+	      QINSERT(&as_consumer_buffer_queue, &buffer->bq);
+	   }
 	}
 	else if (as_bigfile_bsock_proxy == buffer->parent)
 	{
+#if KLDEBUG_CONS_ENQUEUE
       Pmsg6(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d (%p), %s bigfile: %4X, cons.q.size: %d\n",
-         my_thread_id(), buffer->id, buffer, finalize ? "LAST" : "CONT",
+         my_thread_id(), buffer->id, buffer, finalize ? "LAST " : "CONT ",
          HH(as_bigfile_bsock_proxy),
          qsize(&as_consumer_buffer_queue));
+#endif
 
       // TODO continue this big file
 	   // Find the last buffer in the queue which refers to this file
@@ -164,17 +219,21 @@ void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
 
          if ((last != NULL) && (last->parent == as_bigfile_bsock_proxy))
          {
-             Pmsg3(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() last: %d (%p)\n",
+#if KLDEBUG_CONS_ENQUEUE
+            Pmsg3(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() last: %d (%p)\n",
                 my_thread_id(), last->id, last);
-
+#endif
             break;
          }
       } while (last != NULL);
 
+#if KLDEBUG_CONS_ENQUEUE
       Pmsg3(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() last: %d (%p)\n",
          my_thread_id(), last ? last->id : -1, last);
+#endif
 
-      // Buffers for this big file can have already been sent, then put this buffer at the beginning of the queue
+      // Buffers for this big file can have already been sent or this is the first one
+      // ,then put this buffer at the beginning of the queue
       if (last == NULL)
       {
          qinsert_after(&as_consumer_buffer_queue, NULL, &buffer->bq);
@@ -193,16 +252,21 @@ void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
 	}
 	else // as_bigfile_bsock_proxy != buffer->parent
 	{
-      Pmsg5(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d (%p), BLOCKED bigfile: %4X, cons.q.size: %d\n",
+#if KLDEBUG_CONS_ENQUEUE
+	   Pmsg5(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d (%p), BLOCK bigfile: %4X, cons.q.size: %d\n",
          my_thread_id(), buffer->id, buffer, HH(as_bigfile_bsock_proxy),
          qsize(&as_consumer_buffer_queue));
+#endif
 
 	   QINSERT(&as_consumer_buffer_queue, &buffer->bq);
 	}
 
-    Pmsg5(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d (%p), END bigfile: %4X, cons.q.size: %d\n",
+#if KLDEBUG_CONS_ENQUEUE
+    Pmsg5(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d (%p), END   bigfile: %4X, cons.q.size: %d\n",
        my_thread_id(), buffer->id, buffer, HH(as_bigfile_bsock_proxy),
        qsize(&as_consumer_buffer_queue));
+    dump_consumer_queue();
+#endif
 
 	V(as_consumer_queue_lock);
 
@@ -438,7 +502,10 @@ int as_save_file_schedule(
    int digest_stream,
    bool has_file_data)
 {
+#if KLDEBUG
    Pmsg2(50, "\t\t>>>> %4d as_save_file_schedule() file: %s\n", my_thread_id(), ff_pkt->fname);
+#endif
+
 
    as_save_file_context_t *context = (as_save_file_context_t *)malloc(sizeof(as_save_file_context_t));
    context->jcr = jcr;
@@ -458,7 +525,9 @@ void *as_workqueue_engine(void *arg)
 {
    as_save_file_context_t *context = (as_save_file_context_t *)arg;
 
+#if KLDEBUG
    Pmsg1(50, "\t\t>>>> %4d as_workqueue_engine()\n", my_thread_id());
+#endif
 
    as_save_file(
       context->jcr,
@@ -489,25 +558,12 @@ bool as_dont_quit_consumer_thread_loop()
    return (!quit);
 }
 
-as_buffer_t *as_consumer_dequeue_buffer()
-{
-   as_buffer_t *buffer = NULL;
-
-   P(as_consumer_queue_lock);
-   buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
-
-   Pmsg4(50, "\t\t>>>> %4d as_consumer_dequeue_buffer() %d (%p), cons.q.size: %d\n",
-      my_thread_id(), buffer ? buffer->id : -1, buffer, qsize(&as_consumer_buffer_queue));
-
-   V(as_consumer_queue_lock);
-
-   return buffer;
-}
-
 void as_release_buffer(as_buffer_t *buffer)
 {
+#if KLDEBUG
    Pmsg4(50, "\t\t>>>> %4d as_release_buffer() BEGIN %d (%p), free size: %d \n",
 	  my_thread_id(), buffer->id, buffer, qsize(&as_free_buffer_queue));
+#endif
 
 	P(as_buffer_lock);
 
@@ -534,8 +590,11 @@ void as_release_buffer(as_buffer_t *buffer)
 
    pthread_cond_broadcast(&as_buffer_cond);
 
+#if KLDEBUG
    Pmsg4(50, "\t\t>>>> %4d as_release_buffer() END %d (%p), free size: %d \n",
       my_thread_id(), buffer->id, buffer, qsize(&as_free_buffer_queue));
+#endif
+
 }
 
 //
@@ -551,7 +610,9 @@ void *as_consumer_thread_loop(void *arg)
    // Socket is ours now (todo check for sure)
    // sd->clear_locking(); // TODO potrzebne?
 
+#if KLDEBUG_LOOP
    Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() START, sock: %p\n", my_thread_id(), sd);
+#endif
 
    as_buffer_t *buffer = NULL;
 
@@ -561,68 +622,70 @@ void *as_consumer_thread_loop(void *arg)
 
    while (as_dont_quit_consumer_thread_loop())// && as_consumer_queue_not_empty())
    {
+#if KLDEBUG_LOOP
 	  Pmsg1(50, "\t\t>>>> %4d as_consumer_thread_loop() ITERATION BEGIN\n", my_thread_id());
+#endif
 
       P(as_consumer_queue_lock);
 
+#if KLDEBUG_LOOP
       Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() ITERATION BEGIN cons.q.size: %d\n", my_thread_id(), qsize(&as_consumer_buffer_queue));
+#endif
 
       while (as_dont_quit_consumer_thread_loop())
       {
          // Peek at the first element
          buffer = (as_buffer_t *)qnext(&as_consumer_buffer_queue, NULL);
-         // Check if we are in the middle of sending a big file
-         if (as_bigfile_bsock_proxy != NULL)
-         // in the middle of a Big file
+         if (buffer)
          {
-            if (buffer->parent == as_bigfile_bsock_proxy)
+            // Check if we are in the middle of sending a big file
+            if (as_bigfile_bsock_proxy != NULL)
+            // in the middle of a Big file
             {
                // Only get a buffer if it is a continuation of a big file
-               buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
-               if (buffer)
+               if (buffer->parent == as_bigfile_bsock_proxy)
                {
-               Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE BIGFILE buf: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
-                  my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
-                  break;
-               }
-               else
-               {
-                  // should not happen
-                  //cond wait
+                  buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
+                  if (buffer)
+                  {
+   #if KLDEBUG_LOOP
+                     Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE BIGFILE buf: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
+                     my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
+   #endif
+
+                     break;
+                  }
                }
             }
+            // No big file currently served
             else
-            {
-               //cond wait
-            }
-         }
-         // No big file currently served
-         else
-         {
-            if (buffer)
             {
                // Get the buffer from the queue
                buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
                if (buffer)
                {
+   #if KLDEBUG_LOOP
                Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE SMALL buf: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
                   my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
+   #endif
                   break;
                }
-               else
-               {
-                  // should not happen
-                  //cond wait
-               }
-            }
-            else
-            {
-               //cond wait
             }
          }
 
+#if KLDEBUG_LOOP
          Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: WAIT, cons.q.size: %d\n", my_thread_id(), qsize(&as_consumer_buffer_queue));
+#endif
+
+#if 0
+         struct timespec abs_time;
+         clock_gettime(CLOCK_REALTIME, &abs_time);
+         abs_time.tv_sec += 1;
+
+         pthread_cond_timedwait(&as_consumer_queue_cond, &as_consumer_queue_lock, &abs_time);
+#else
          pthread_cond_wait(&as_consumer_queue_cond, &as_consumer_queue_lock);
+#endif
       }
       V(as_consumer_queue_lock);
 
@@ -642,8 +705,10 @@ void *as_consumer_thread_loop(void *arg)
 
       int pos_in_buffer = 0;
 
+#if KLDEBUG_LOOP
       Pmsg8(50, "\t\t>>>> %4d as_consumer_thread_loop() START SENDING IN THIS ITER buf: %4d bufsize: %d parent: %4X (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
          my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent, to_send, pos_in_buffer, buffer->size);
+#endif
 
       while (pos_in_buffer < buffer->size)
       {
@@ -652,16 +717,25 @@ void *as_consumer_thread_loop(void *arg)
             memcpy(&to_send, &buffer->data[pos_in_buffer], sizeof(to_send));
             pos_in_buffer += sizeof(to_send);
 
+#if KLDEBUG_LOOP
             Pmsg8(50, "\t\t>>>> %4d GET_TO_SEND as_consumer_thread_loop() buf: %4d bufsize: %d parent: %4X (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
                my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent, to_send, pos_in_buffer, buffer->size);
+#endif
 
+//
+// TODO tutaj sa errory !!!!
+//
             ASSERT(to_send != 0);
          }
 
+         // Shouldnt happen
          if (pos_in_buffer + to_send > buffer->size)
          {
+
+#if KLDEBUG_LOOP
             Pmsg8(50, "\t\t>>>> %4d SEND_LESS_B as_consumer_thread_loop() buf: %4d bufsize: %d parent: %4X (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
             		my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent, to_send, pos_in_buffer, buffer->size);
+#endif
 
             sd->msg = &buffer->data[pos_in_buffer];
             sd->msglen = (buffer->size - pos_in_buffer);
@@ -669,8 +743,10 @@ void *as_consumer_thread_loop(void *arg)
 
             to_send -= (buffer->size - pos_in_buffer);
 
+#if KLDEBUG_LOOP
             Pmsg8(50, "\t\t>>>> %4d SEND_LESS_E as_consumer_thread_loop() buf: %4d bufsize: %d parent: %4X (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
                   my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent, to_send, pos_in_buffer, buffer->size);
+#endif
 
             // pos_in_buffer = buffer->size; niepotrzebne
             // End of buffer, need to pick up the next one
@@ -679,16 +755,20 @@ void *as_consumer_thread_loop(void *arg)
 
          if ((to_send < 0) && (to_send != NEED_TO_INIT)) // signal
          {
+#if KLDEBUG_LOOP
             Pmsg8(50, "\t\t>>>> %4d SEND_SIGNAL as_consumer_thread_loop() buf: %4d bufsize: %d parent: %4X (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
                   my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent, to_send, pos_in_buffer, buffer->size);
+#endif
 
             sd->signal(to_send);
             to_send = NEED_TO_INIT;
          }
          else if (to_send > 0)
          {
+#if KLDEBUG_LOOP
             Pmsg8(50, "\t\t>>>> %4d SEND_ENTIRE as_consumer_thread_loop() buf: %4d bufsize: %d parent: %4X (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
                   my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent, to_send, pos_in_buffer, buffer->size);
+#endif
 
             sd->msg = &buffer->data[pos_in_buffer];
             sd->msglen = to_send;
@@ -701,16 +781,23 @@ void *as_consumer_thread_loop(void *arg)
          ASSERT(to_send != 0);
       }
 
+#if KLDEBUG_LOOP
       Pmsg8(50, "\t\t>>>> %4d END SENDING THIS ITER as_consumer_thread_loop() buf: %4d bufsize: %d parent: %4X (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
             my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent, to_send, pos_in_buffer, buffer->size);
+#endif
 
       ASSERT(buffer);
       as_release_buffer(buffer);
 
+#if KLDEBUG_LOOP
       Pmsg1(50, "\t\t>>>> %4d as_consumer_thread_loop() ITERATION END\n", my_thread_id());
+#endif
+
    }
 
+#if KLDEBUG_LOOP
    Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() STOP, sock: %p\n", my_thread_id(), sd);
+#endif
 
    return NULL;
 }
@@ -725,8 +812,10 @@ void as_init_free_buffers_queue()
    as_buffer_t *buffer = NULL;
    char *start = NULL;
 
+#if KLDEBUG
    Pmsg2(50, "\t\t>>>> %4d as_init_free_buffers_queue() size: %d\n",
       my_thread_id(), AS_BUFFERS);
+#endif
 
    for (int i = 0; i < AS_BUFFERS; ++i)
    {
@@ -749,13 +838,18 @@ void as_init_consumer_thread(BSOCK *sd)
 
 	pthread_create(&as_consumer_thread, NULL, as_consumer_thread_loop, (void *)sd);
 
+#if KLDEBUG
    Pmsg3(50, "\t\t>>>> %4d as_init_consumer_thread() id: %4d sock: %p\n",
       my_thread_id(), H(as_consumer_thread), sd);
+#endif
+
 }
 
 void as_workqueue_init()
 {
+#if KLDEBUG
    Pmsg1(50, "\t\t>>>> %4d as_workqueue_init()\n", my_thread_id());
+#endif
 
    workq_init(&as_work_queue, AS_PRODUCER_THREADS, as_workqueue_engine);
 }
@@ -766,7 +860,9 @@ static uint32_t as_initial_buf_size = 0;
 
 void as_init(BSOCK *sd, uint32_t buf_size)
 {
+#if KLDEBUG
    Pmsg2(50, "\t\t>>>> %4d as_init() sock: %p\n", my_thread_id(), sd);
+#endif
 
    // Store the pointer to the poolmem
    as_save_msg_pointer = sd->msg;
@@ -793,7 +889,10 @@ uint32_t as_get_initial_bsock_proxy_buf_size()
 
 void as_request_consumer_thread_quit()
 {
+#if KLDEBUG
    Pmsg1(50, "\t\t>>>> %4d as_request_consumer_thread_quit()\n", my_thread_id());
+#endif
+
 
    P(as_consumer_thread_lock);
    as_consumer_thread_quit = true;
@@ -803,29 +902,39 @@ void as_request_consumer_thread_quit()
 void as_join_consumer_thread()
 {
    pthread_cond_signal(&as_consumer_queue_cond);
+
+
+#if KLDEBUG
    Pmsg1(50, "\t\t>>>> %4d as_join_consumer_thread()\n", my_thread_id());
+#endif
+
+
 	pthread_join(as_consumer_thread, NULL);
 }
 
 void as_dealloc_all_buffers()
 {
+#if KLDEBUG
    Pmsg3(50, "\t\t>>>> %4d as_dealloc_all_buffers() BEGIN, free size %4d consumer size %4d\n",
       my_thread_id(), qsize(&as_free_buffer_queue), qsize(&as_consumer_buffer_queue));
+#endif
+
 
    as_buffer_t *buffer = NULL;
-   int buffer_counter = 0;
 
    do
    {
       buffer = (as_buffer_t *)QREMOVE(&as_free_buffer_queue);
       if (buffer)
       {
-    	   Pmsg3(50, "\t\t>>>> %4d as_dealloc_all_buffers() FREE buffer: %d (%p)\n",
+#if KLDEBUG
+         Pmsg3(50, "\t\t>>>> %4d as_dealloc_all_buffers() FREE buffer: %d (%p)\n",
     	      my_thread_id(), buffer->id, buffer);
+#endif
+
 
     	  // Smart alloc does not allow free(NULL), which is inconsistent with how free works
          free(buffer);
-         ++buffer_counter;
       }
    } while (buffer != NULL);
 
@@ -834,41 +943,51 @@ void as_dealloc_all_buffers()
       buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
       if (buffer)
       {
-   	   Pmsg3(50, "\t\t>>>> %4d as_dealloc_all_buffers() CONS buffer: %d (%p)\n",
+#if KLDEBUG
+         Pmsg3(50, "\t\t>>>> %4d as_dealloc_all_buffers() CONS buffer: %d (%p)\n",
    	      my_thread_id(), buffer->id, buffer);
+#endif
+
 
     	  // Smart alloc does not allow free(NULL), which is inconsistent with how free works
          free(buffer);
-         ++buffer_counter;
       }
    } while (buffer != NULL);
 
    if (as_bigfile_buffer_only)
    {
+#if KLDEBUG
       Pmsg3(50, "\t\t>>>> %4d as_dealloc_all_buffers() BIG buffer: %d (%p)\n",
          my_thread_id(), as_bigfile_buffer_only->id, as_bigfile_buffer_only);
+#endif
+
 
       free(as_bigfile_buffer_only);
    }
 
+#if KLDEBUG
    Pmsg3(50, "\t\t>>>> %4d as_dealloc_all_buffers() END, free size %4d consumer size %4d\n",
       my_thread_id(), qsize(&as_free_buffer_queue), qsize(&as_consumer_buffer_queue));
+#endif
 
    ASSERT(0 == qsize(&as_free_buffer_queue));
    ASSERT(0 == qsize(&as_consumer_buffer_queue));
-   ASSERT(buffer_counter == AS_BUFFERS);
 }
 
 void as_workqueue_destroy()
 {
+#if KLDEBUG
    Pmsg1(50, "\t\t>>>> %4d as_workqueue_destroy()\n", my_thread_id());
+#endif
 
    workq_destroy(&as_work_queue);
 }
 
 void as_shutdown(BSOCK *sd)
 {
+#if KLDEBUG
    Pmsg1(50, "\t\t>>>> %4d as_shutdown() BEGIN\n", my_thread_id());
+#endif
 
    as_workqueue_destroy();
 
@@ -879,5 +998,7 @@ void as_shutdown(BSOCK *sd)
    // Restore the pointer to the poolmem
    sd->msg = as_save_msg_pointer;
 
+#if KLDEBUG
    Pmsg1(50, "\t\t>>>> %4d as_shutdown() END\n", my_thread_id());
+#endif
 }

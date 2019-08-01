@@ -342,12 +342,30 @@ fi_checked:
       }
    }
 
+#if KLDEBUG
+            Pmsg1(50, "\t\t\t!!!! BEGIN setJobStatus ok=%d\n", ok);
+#endif
+
    /* Create Job status for end of session label */
    jcr->setJobStatus(ok?JS_Terminated:JS_ErrorTerminated);
 
+
+#if KLDEBUG
+            Pmsg1(50, "\t\t\t!!!! END setJobStatus ok=%d\n", ok);
+#endif
+
    if (ok) {
       /* Terminate connection with Client */
+#if KLDEBUG
+            Pmsg0(50, "\t\t\t!!!! fd->fsend(OK_append)\n");
+#endif
+
       fd->fsend(OK_append);
+
+#if KLDEBUG
+            Pmsg0(50, "\t\t\t!!!! do_client_commands(jcr)\n");
+#endif
+
       do_client_commands(jcr);            /* finish dialog with Client */
    } else {
       fd->fsend("3999 Failed append\n");
