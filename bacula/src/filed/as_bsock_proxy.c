@@ -1,14 +1,6 @@
 #include "bacula.h"
 #include "as_bsock_proxy.h"
 
-
-#define SOCK_BASE 0
-pthread_mutex_t proxy_cnt_lock = PTHREAD_MUTEX_INITIALIZER;
-int proxy_cnt = 0;
-
-
-
-
 AS_BSOCK_PROXY::AS_BSOCK_PROXY()
 {
    Pmsg1(50, "\t\t>>>> %4d AS_BSOCK_PROXY::AS_BSOCK_PROXY()\n", my_thread_id());
@@ -21,22 +13,17 @@ void AS_BSOCK_PROXY::init()
 
    msg = realloc_pool_memory(msg, (int32_t)as_get_initial_bsock_proxy_buf_size());
 
-   P(proxy_cnt_lock);
-   id = proxy_cnt + SOCK_BASE;
-   ++proxy_cnt;
-   V(proxy_cnt_lock);
-
    Pmsg2(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::init()\n", my_thread_id(), id);
 }
 
 bool AS_BSOCK_PROXY::send()
 {
-   Pmsg7(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::send() BEGIN buf: %d bufsize: %4d parent: %d msglen: %4d msg: %4d\n",
+   Pmsg7(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::send() BEGIN buf: %d bufsize: %4d parent: %4X msglen: %4d msg: %4d\n",
 	   my_thread_id(),
 	   id,
 	   as_buf ? as_buf->id : -1,
 	   as_buf ? as_buf->size : -1,
-	   as_buf ? (as_buf->parent ? as_buf->parent->id : -1) : -1,
+	   as_buf ? HH(as_buf->parent) : 0,
 	   msglen,
 	   H(msg));
 
@@ -51,7 +38,7 @@ bool AS_BSOCK_PROXY::send()
    {
       as_buf = as_acquire_buffer(NULL);
 
-      Pmsg7(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::send() NULL BUF GET NEW buf: %d bufsize: %4d parent: %d msglen: %4d msg: %4d\n",
+      Pmsg7(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::send() NULL BUF GET NEW buf: %d bufsize: %4d parent: %4X msglen: %4d msg: %4d\n",
    	   my_thread_id(),
    	   id,
    	   as_buf ? as_buf->id : -1,
@@ -70,7 +57,7 @@ bool AS_BSOCK_PROXY::send()
       as_buf->parent = this;
       as_consumer_enqueue_buffer(as_buf, false);
 
-      Pmsg7(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::send() WONT FIT GET NEW buf: %d bufsize: %4d parent: %d msglen: %4d msg: %4d\n",
+      Pmsg7(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::send() WONT FIT GET NEW buf: %d bufsize: %4d parent: %4X msglen: %4d msg: %4d\n",
    	   my_thread_id(),
    	   id,
    	   as_buf ? as_buf->id : -1,
@@ -89,7 +76,7 @@ bool AS_BSOCK_PROXY::send()
    ASSERT(as_buf != NULL);
    ASSERT(as_buf->size <= AS_BUFFER_CAPACITY - sizeof(msglen));
 
-   Pmsg7(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::send() PUT MSGLEN buf: %d bufsize: %4d parent: %d msglen: %4d msg: %4d\n",
+   Pmsg7(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::send() PUT MSGLEN buf: %d bufsize: %4d parent: %4X msglen: %4d msg: %4d\n",
       my_thread_id(),
       id,
       as_buf ? as_buf->id : -1,
@@ -142,7 +129,7 @@ bool AS_BSOCK_PROXY::send()
       /* Get a new one which is already marked */
       as_buf = as_acquire_buffer(this);
 
-      Pmsg7(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::send() FULL GET NEW buf: %d bufsize: %4d parent: %d msglen: %4d msg: %4d\n",
+      Pmsg7(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::send() FULL GET NEW buf: %d bufsize: %4d parent: %4X msglen: %4d msg: %4d\n",
    	   my_thread_id(),
    	   id,
    	   as_buf ? as_buf->id : -1,
@@ -163,12 +150,12 @@ bool AS_BSOCK_PROXY::send()
       ASSERT(as_buf->size <= AS_BUFFER_CAPACITY);
    }
 
-   Pmsg7(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::send() END   buf: %d bufsize: %4d parent: %d msglen: %4d msg: %4d\n",
+   Pmsg7(50, "\t\t>>>> %4d %4d AS_BSOCK_PROXY::send() END   buf: %d bufsize: %4d parent: %4X msglen: %4d msg: %4d\n",
 	   my_thread_id(),
 	   id,
 	   as_buf ? as_buf->id : -1,
 	   as_buf ? as_buf->size : -1,
-	   as_buf ? (as_buf->parent ? as_buf->parent->id : -1) : -1,
+	   as_buf ? HH(as_buf->parent : 0,
 	   msglen,
 	   H(msg));
 

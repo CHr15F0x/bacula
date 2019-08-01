@@ -21,6 +21,9 @@ struct JCR;
       ((unsigned long)x >> 4) ^ ((unsigned long)x >> 5) ^ \
       ((unsigned long)x >> 6) ^ ((unsigned long)x >> 7)))
 
+#define HH(x) (int)((unsigned short)( \
+      ((unsigned long)x >> 0) ^ ((unsigned long)x >> 2) ^ \
+      ((unsigned long)x >> 4) ^ ((unsigned long)x >> 6)))
 
 
 int my_thread_id();

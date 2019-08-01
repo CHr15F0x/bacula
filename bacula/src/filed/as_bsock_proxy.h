@@ -12,18 +12,10 @@ public:
    POOLMEM *msg;
    int32_t msglen;
 
-
-   // TODO do testowania
-   int id;
-
-
 private:
 
    as_buffer_t *as_buf;
    int allocated_size;
-
-
-
 
 public:
 
