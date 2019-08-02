@@ -13,7 +13,7 @@
 
 
 #define KLDEBUG 0
-#define KLDEBUG_LOOP 0
+#define KLDEBUG_LOOP 1
 #define KLDEBUG_CONS_ENQUEUE 1
 
 
@@ -561,8 +561,8 @@ void *as_consumer_thread_loop(void *arg)
 
       while (as_dont_quit_consumer_thread_loop())
       {
-         // Just get the first elem
-         buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
+         // Peek at the first elem
+         buffer = (as_buffer_t *)qnext(&as_consumer_buffer_queue, NULL);
          if (buffer)
          {
             // If this is the first chunk of a bigger file - mark it
@@ -570,6 +570,7 @@ void *as_consumer_thread_loop(void *arg)
             {
                as_bigfile_bsock_proxy = buffer->parent;
                // Good to go
+               buffer = (as_buffer_t *)qremove(&as_consumer_buffer_queue);
 #if KLDEBUG_LOOP
          Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
             my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
@@ -587,6 +588,7 @@ void *as_consumer_thread_loop(void *arg)
                      as_bigfile_bsock_proxy = NULL;
                   }
                   // Good to go
+                  buffer = (as_buffer_t *)qremove(&as_consumer_buffer_queue);
 #if KLDEBUG_LOOP
          Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
             my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
@@ -595,8 +597,32 @@ void *as_consumer_thread_loop(void *arg)
                }
                else
                {
-                  // Cannot process this chunk now, move it to the end
-                  qinsert(&as_consumer_buffer_queue, &buffer->bq);
+                  // Cannot process this chunk now, try to find the next chunk from the current bigfile
+                  while (buffer != NULL)
+                  {
+                     buffer = (as_buffer_t *)qnext(&as_consumer_buffer_queue, &buffer->bq);
+
+                     if (buffer != NULL && buffer->parent == as_bigfile_bsock_proxy)
+                     {
+                        break;
+                     }
+                  }
+
+                  if (buffer != NULL && buffer->parent == as_bigfile_bsock_proxy)
+                  {
+                     // If this is the last chunk of a bigger file - unmark it
+                     if (buffer->final)
+                     {
+                        as_bigfile_bsock_proxy = NULL;
+                     }
+                     // Good to go
+                     buffer = (as_buffer_t *)qdchain(&buffer->bq);
+   #if KLDEBUG_LOOP
+            Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
+               my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
+   #endif
+                     break;
+                  }
                }
             }
          }
@@ -605,7 +631,7 @@ void *as_consumer_thread_loop(void *arg)
          Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: WAIT, cons.q.size: %d\n", my_thread_id(), qsize(&as_consumer_buffer_queue));
 #endif
 
-#if 0
+#if 1
          struct timespec abs_time;
          clock_gettime(CLOCK_REALTIME, &abs_time);
          abs_time.tv_sec += 1;
