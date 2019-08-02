@@ -179,108 +179,13 @@ void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
     dump_consumer_queue();
 #endif
 
-	if (as_bigfile_bsock_proxy == NULL)
-	{
-	   as_bigfile_bsock_proxy = buffer->parent;
+   if (finalize)
+   {
+      // This was the last buffer for this big file
+      buffer->final = finalize;
+   }
 
-#if KLDEBUG_CONS_ENQUEUE
-	   Pmsg5(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d (%p), NEW   bigfile: %4X, cons.q.size: %d\n",
-         my_thread_id(), buffer->id, buffer, HH(as_bigfile_bsock_proxy),
-         qsize(&as_consumer_buffer_queue));
-#endif
-
-	   if (as_bigfile_bsock_proxy != NULL)
-	   {
-	      // Push the first chunk of the first big file at the beginning
-	      qinsert_after(&as_consumer_buffer_queue, NULL, &buffer->bq);
-	   }
-	   else
-	   {
-	      // Ordinary small file - at the end
-	      QINSERT(&as_consumer_buffer_queue, &buffer->bq);
-	   }
-	}
-	else if (as_bigfile_bsock_proxy == buffer->parent)
-	{
-#if KLDEBUG_CONS_ENQUEUE
-      Pmsg6(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d (%p), %s bigfile: %4X, cons.q.size: %d\n",
-         my_thread_id(), buffer->id, buffer, finalize ? "LAST " : "CONT ",
-         HH(as_bigfile_bsock_proxy),
-         qsize(&as_consumer_buffer_queue));
-#endif
-
-      // TODO continue this big file
-	   // Find the last buffer in the queue which refers to this file
-      as_buffer_t *last = NULL;
-
-      do
-      {
-         last = (as_buffer_t *)qprev(&as_consumer_buffer_queue, last ? &last->bq : NULL);
-
-         if ((last != NULL) && (last->parent == as_bigfile_bsock_proxy))
-         {
-#if KLDEBUG_CONS_ENQUEUE
-            Pmsg3(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() last: %d (%p)\n",
-                my_thread_id(), last->id, last);
-#endif
-            break;
-         }
-      } while (last != NULL);
-
-#if KLDEBUG_CONS_ENQUEUE
-      Pmsg3(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() last: %d (%p)\n",
-         my_thread_id(), last ? last->id : -1, last);
-#endif
-
-      if (finalize)
-      {
-         // This was the last buffer for this big file
-         buffer->final = finalize;
-      }
-
-      // Buffers for this big file can have already been sent or this is the first one
-      // ,then put this buffer at the beginning of the queue
-      if (last == NULL)
-      {
-         qinsert_after(&as_consumer_buffer_queue, NULL, &buffer->bq);
-      }
-      // Or are still in the queue, then put the buffer after the last buffer for this file
-      else
-      {
-         qinsert_after(&as_consumer_buffer_queue, &last->bq, &buffer->bq);
-      }
-	}
-	else // as_bigfile_bsock_proxy != buffer->parent
-	{
-#if KLDEBUG_CONS_ENQUEUE
-	   Pmsg5(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d (%p), BLOCK bigfile: %4X, cons.q.size: %d\n",
-         my_thread_id(), buffer->id, buffer, HH(as_bigfile_bsock_proxy),
-         qsize(&as_consumer_buffer_queue));
-#endif
-
-	   QINSERT(&as_consumer_buffer_queue, &buffer->bq);
-
-	   // put this chunk just after the last chunk of any bigfile in this queue
-
-      // Find the last buffer in the queue which belongs to a big file
-      as_buffer_t *last = NULL;
-
-      do
-      {
-         last = (as_buffer_t *)qprev(&as_consumer_buffer_queue, last ? &last->bq : NULL);
-
-         if ((last != NULL) && (last->parent != NULL))
-         {
-#if KLDEBUG_CONS_ENQUEUE
-            Pmsg3(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() last: %d (%p)\n",
-                my_thread_id(), last->id, last);
-#endif
-            break;
-         }
-      } while (last != NULL);
-
-
-	}
+   QINSERT(&as_consumer_buffer_queue, &buffer->bq);
 
 #if KLDEBUG_CONS_ENQUEUE
     Pmsg5(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d (%p), END   bigfile: %4X, cons.q.size: %d\n",
@@ -630,7 +535,7 @@ void *as_consumer_thread_loop(void *arg)
    BSOCK *sd = (BSOCK *)arg;
 
    // Socket is ours now (todo check for sure)
-   // sd->clear_locking(); // TODO potrzebne?
+   sd->clear_locking(); // TODO potrzebne?
 
 #if KLDEBUG_LOOP
    Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() START, sock: %p\n", my_thread_id(), sd);
@@ -656,49 +561,42 @@ void *as_consumer_thread_loop(void *arg)
 
       while (as_dont_quit_consumer_thread_loop())
       {
-         // Peek at the first element
-         buffer = (as_buffer_t *)qnext(&as_consumer_buffer_queue, NULL);
+         // Just get the first elem
+         buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
          if (buffer)
          {
-            // Check if we are in the middle of sending a big file
-            if (as_bigfile_bsock_proxy != NULL)
-            // in the middle of a Big file
+            // If this is the first chunk of a bigger file - mark it
+            if (as_bigfile_bsock_proxy == NULL)
             {
-               // Only get a buffer if it is a continuation of a big file
-               if (buffer->parent == as_bigfile_bsock_proxy)
-               {
-                  buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
-                  if (buffer)
-                  {
-   #if KLDEBUG_LOOP
-                     Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE BIGFILE buf: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
-                     my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
-   #endif
-
-                     if (buffer->final)
-                     {
-                        // This was the last one
-                        as_bigfile_bsock_proxy = NULL;
-                     }
-
-                     break;
-                  }
-               }
+               as_bigfile_bsock_proxy = buffer->parent;
+               // Good to go
+               break;
             }
-            // No big file currently served
             else
             {
-               // Get the buffer from the queue
-               buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
-               if (buffer)
+               // If this is the next chunk of this bigger file
+               if (as_bigfile_bsock_proxy == buffer->parent)
                {
-   #if KLDEBUG_LOOP
-               Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE SMALL buf: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
-                  my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
-   #endif
+                  // If this is the last chunk of a bigger file - unmark it
+                  if (buffer->final)
+                  {
+                     as_bigfile_bsock_proxy = NULL;
+                  }
+                  // Good to go
                   break;
                }
+               else
+               {
+                  // Cannot process this chunk now, move it to the end
+                  qinsert(&as_consumer_buffer_queue, &buffer->bq);
+               }
             }
+
+#if KLDEBUG_LOOP
+         Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
+            my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
+#endif
+            break;
          }
 
 #if KLDEBUG_LOOP
