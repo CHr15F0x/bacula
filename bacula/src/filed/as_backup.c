@@ -12,10 +12,10 @@
 
 
 
-#define KLDEBUG 0
-#define KLDEBUG_LOOP 0
-#define KLDEBUG_CONS_ENQUEUE 0
-
+#define KLDEBUG 1
+#define KLDEBUG_LOOP 1
+#define KLDEBUG_CONS_ENQUEUE 1
+#define KLDEBUG_DEALLOC_BUFFERS 1
 
 
 int my_thread_id()
@@ -473,7 +473,23 @@ void *as_workqueue_engine(void *arg)
 // Consumer loop
 //
 
-bool as_dont_quit_consumer_thread_loop()
+bool as_consumer_thread_started = false;
+
+void as_wait_for_consumer_thread_started()
+{
+	bool started = false;
+
+	do
+	{
+		   P(as_consumer_thread_lock);
+		   started = as_consumer_thread_started;
+		   V(as_consumer_thread_lock);
+	}
+	while (started == false);
+}
+
+
+bool as_quit_consumer_thread_loop()
 {
    bool quit = false;
 
@@ -482,6 +498,19 @@ bool as_dont_quit_consumer_thread_loop()
    V(as_consumer_thread_lock);
 
    return (!quit);
+}
+
+bool as_is_consumer_queue_empty(bool lockme)
+{
+	bool empty = false;
+
+    if (lockme) P(as_consumer_queue_lock);
+
+    empty = (qsize(&as_consumer_buffer_queue) == 0);
+
+    if (lockme) V(as_consumer_queue_lock);
+
+    return empty;
 }
 
 void as_release_buffer(as_buffer_t *buffer)
@@ -541,13 +570,17 @@ void *as_consumer_thread_loop(void *arg)
    Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() START, sock: %p\n", my_thread_id(), sd);
 #endif
 
+   P(as_consumer_thread_lock);
+   as_consumer_thread_started = true;
+   V(as_consumer_thread_lock);
+
    as_buffer_t *buffer = NULL;
 
 #define NEED_TO_INIT -9999
 
    int32_t to_send = NEED_TO_INIT;
 
-   while (as_dont_quit_consumer_thread_loop())// && as_consumer_queue_not_empty())
+   while ((as_quit_consumer_thread_loop() == false) || ( as_quit_consumer_thread_loop() && (as_is_consumer_queue_empty(true) == false)))
    {
 #if KLDEBUG_LOOP
 	  Pmsg1(50, "\t\t>>>> %4d as_consumer_thread_loop() ITERATION BEGIN\n", my_thread_id());
@@ -559,7 +592,7 @@ void *as_consumer_thread_loop(void *arg)
       Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() ITERATION BEGIN cons.q.size: %d\n", my_thread_id(), qsize(&as_consumer_buffer_queue));
 #endif
 
-      while (as_dont_quit_consumer_thread_loop())
+      while ((as_quit_consumer_thread_loop() == false) || (as_quit_consumer_thread_loop() && (as_is_consumer_queue_empty(false) == false)))
       {
          // Peek at the first elem
          buffer = (as_buffer_t *)qnext(&as_consumer_buffer_queue, NULL);
@@ -569,16 +602,21 @@ void *as_consumer_thread_loop(void *arg)
             if (as_bigfile_bsock_proxy == NULL)
             {
                as_bigfile_bsock_proxy = buffer->parent;
-               // Good to go
+               // Dequeue this buffer
                buffer = (as_buffer_t *)qremove(&as_consumer_buffer_queue);
+
 #if KLDEBUG_LOOP
          Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
             my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
 #endif
+         	   ASSERT(buffer);
                break;
             }
             else
             {
+                Pmsg0(50, "\t\t>>>> BOOM ! consumer\n");
+
+
                // If this is the next chunk of this bigger file
                if (as_bigfile_bsock_proxy == buffer->parent)
                {
@@ -593,7 +631,8 @@ void *as_consumer_thread_loop(void *arg)
          Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
             my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
 #endif
-                  break;
+                  ASSERT(buffer);
+         	 	  break;
                }
                else
                {
@@ -621,7 +660,8 @@ void *as_consumer_thread_loop(void *arg)
             Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
                my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
    #endif
-                     break;
+            		ASSERT(buffer);
+            		break;
                   }
                }
             }
@@ -643,7 +683,8 @@ void *as_consumer_thread_loop(void *arg)
       }
       V(as_consumer_queue_lock);
 
-      if (as_dont_quit_consumer_thread_loop() == false)
+#if 0
+      if (as_quit_consumer_thread_loop()) == false)
       {
          if (buffer)
          {
@@ -652,6 +693,7 @@ void *as_consumer_thread_loop(void *arg)
 
          return NULL;
       }
+#endif
 
       ASSERT(buffer);
       ASSERT(buffer->size > 0);
@@ -753,6 +795,10 @@ void *as_consumer_thread_loop(void *arg)
    Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() STOP, sock: %p\n", my_thread_id(), sd);
 #endif
 
+   P(as_consumer_thread_lock);
+   as_consumer_thread_started = false;
+   V(as_consumer_thread_lock);
+
    return NULL;
 }
 
@@ -826,8 +872,8 @@ void as_init(BSOCK *sd, uint32_t buf_size)
 	as_init_consumer_thread(sd);
 
 	// wait for consumer thread started
-	while (as_dont_quit_consumer_thread_loop() == false)
-	{}
+
+	as_wait_for_consumer_thread_started();
 
 	as_workqueue_init();
 }
@@ -868,7 +914,7 @@ void as_join_consumer_thread()
 
 void as_dealloc_all_buffers()
 {
-#if KLDEBUG
+#if KLDEBUG_DEALLOC_BUFFERS
    Pmsg3(50, "\t\t>>>> %4d as_dealloc_all_buffers() BEGIN, free size %4d consumer size %4d\n",
       my_thread_id(), qsize(&as_free_buffer_queue), qsize(&as_consumer_buffer_queue));
 #endif
@@ -881,7 +927,7 @@ void as_dealloc_all_buffers()
       buffer = (as_buffer_t *)QREMOVE(&as_free_buffer_queue);
       if (buffer)
       {
-#if KLDEBUG
+#if KLDEBUG_DEALLOC_BUFFERS
          Pmsg3(50, "\t\t>>>> %4d as_dealloc_all_buffers() FREE buffer: %d (%p)\n",
     	      my_thread_id(), buffer->id, buffer);
 #endif
@@ -895,9 +941,15 @@ void as_dealloc_all_buffers()
    do
    {
       buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
+
+      ASSERT(buffer != NULL);
+
       if (buffer)
       {
-#if KLDEBUG
+
+
+
+#if KLDEBUG_DEALLOC_BUFFERS
          Pmsg3(50, "\t\t>>>> %4d as_dealloc_all_buffers() CONS buffer: %d (%p)\n",
    	      my_thread_id(), buffer->id, buffer);
 #endif
@@ -910,7 +962,7 @@ void as_dealloc_all_buffers()
 
    if (as_bigfile_buffer_only)
    {
-#if KLDEBUG
+#if KLDEBUG_DEALLOC_BUFFERS
       Pmsg3(50, "\t\t>>>> %4d as_dealloc_all_buffers() BIG buffer: %d (%p)\n",
          my_thread_id(), as_bigfile_buffer_only->id, as_bigfile_buffer_only);
 #endif
@@ -919,7 +971,7 @@ void as_dealloc_all_buffers()
       free(as_bigfile_buffer_only);
    }
 
-#if KLDEBUG
+#if KLDEBUG_DEALLOC_BUFFERS
    Pmsg3(50, "\t\t>>>> %4d as_dealloc_all_buffers() END, free size %4d consumer size %4d\n",
       my_thread_id(), qsize(&as_free_buffer_queue), qsize(&as_consumer_buffer_queue));
 #endif

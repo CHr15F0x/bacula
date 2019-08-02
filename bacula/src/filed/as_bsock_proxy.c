@@ -37,7 +37,7 @@ bool AS_BSOCK_PROXY::send()
 #endif
 
 
-   /* Nothing to send */
+   /* Nothing to send and this is not a signal */
    if (msglen == 0)
    {
 	   return true;
@@ -88,6 +88,10 @@ bool AS_BSOCK_PROXY::send()
       ASSERT(as_buf != NULL);
       ASSERT(as_buf->size == 0);
    }
+   else
+   {
+	   // Continue using a previously allocated buffer
+   }
 
    ASSERT(as_buf != NULL);
    ASSERT(as_buf->size <= AS_BUFFER_CAPACITY - sizeof(msglen));
@@ -114,21 +118,17 @@ bool AS_BSOCK_PROXY::send()
       return true;
    }
 
-#if 0
-   /* Put the lenght of data first */
-   memcpy(&as_buf->data[as_buf->size], &msglen, sizeof(msglen));
-   as_buf->size += sizeof(msglen);
-
-   ASSERT(as_buf->size <= AS_BUFFER_CAPACITY);
-#endif
-
-   /* Put the real message next */
+   /* This is a real message, there is some payload */
    char *pos = msg;
    int32_t to_send = msglen;
 
+   /* The entire message will not fit into the buffer */
    while (as_buf->size + sizeof(to_send) + to_send > AS_BUFFER_CAPACITY)
    {
-      /* Fill the current buffer */
+	      Pmsg0(50, "\t\t>>>> BOOM! proxy\n");
+
+
+      /* Check how much we can put into the current buffer */
       int32_t send_now = AS_BUFFER_CAPACITY - as_buf->size - sizeof(to_send);
 
       if (send_now > 0)
@@ -148,7 +148,7 @@ bool AS_BSOCK_PROXY::send()
       }
       else
       {
-    	   // just send the buf
+    	   // just send the buf, we can't fit more
       }
 
 	  ASSERT(as_buf->size <= AS_BUFFER_CAPACITY);
@@ -180,7 +180,9 @@ bool AS_BSOCK_PROXY::send()
 
       memcpy(&as_buf->data[as_buf->size], pos, to_send);
       as_buf->size += to_send;
+      pos += to_send;
 
+      ASSERT(pos <= msg + msglen);
       ASSERT(as_buf->size <= AS_BUFFER_CAPACITY);
    }
 
