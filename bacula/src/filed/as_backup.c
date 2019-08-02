@@ -614,9 +614,6 @@ void *as_consumer_thread_loop(void *arg)
             }
             else
             {
-                Pmsg0(50, "\t\t>>>> BOOM ! consumer\n");
-
-
                // If this is the next chunk of this bigger file
                if (as_bigfile_bsock_proxy == buffer->parent)
                {
@@ -631,8 +628,9 @@ void *as_consumer_thread_loop(void *arg)
          Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
             my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
 #endif
+
                   ASSERT(buffer);
-         	 	  break;
+         	 	   break;
                }
                else
                {
@@ -660,8 +658,9 @@ void *as_consumer_thread_loop(void *arg)
             Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
                my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
    #endif
-            		ASSERT(buffer);
-            		break;
+
+                     ASSERT(buffer);
+                     break;
                   }
                }
             }
@@ -682,17 +681,13 @@ void *as_consumer_thread_loop(void *arg)
 #endif
       }
       V(as_consumer_queue_lock);
-#if 0 // To nie moze tu byc bo powoduje wyjscie z watku
-      if ((as_quit_consumer_thread_loop() == false) || (as_quit_consumer_thread_loop() && (as_is_consumer_queue_empty(false) == false)))
-      {
-         if (buffer)
-         {
-            as_release_buffer(buffer);
-         }
 
+      if (buffer == NULL)
+      {
+         // To znaczy ze wychodzimy z watku
          return NULL;
       }
-#endif
+
       ASSERT(buffer);
       ASSERT(buffer->size > 0);
       ASSERT(buffer->size <= AS_BUFFER_CAPACITY);
@@ -987,7 +982,9 @@ void as_shutdown(BSOCK *sd)
 #endif
 
    as_workqueue_destroy();
+//   sleep(5);
    as_request_consumer_thread_quit();
+//   sleep(5);
    as_join_consumer_thread();
    as_dealloc_all_buffers();
 
