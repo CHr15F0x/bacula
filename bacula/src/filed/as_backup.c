@@ -570,6 +570,10 @@ void *as_consumer_thread_loop(void *arg)
             {
                as_bigfile_bsock_proxy = buffer->parent;
                // Good to go
+#if KLDEBUG_LOOP
+         Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
+            my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
+#endif
                break;
             }
             else
@@ -583,6 +587,10 @@ void *as_consumer_thread_loop(void *arg)
                      as_bigfile_bsock_proxy = NULL;
                   }
                   // Good to go
+#if KLDEBUG_LOOP
+         Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
+            my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
+#endif
                   break;
                }
                else
@@ -591,12 +599,6 @@ void *as_consumer_thread_loop(void *arg)
                   qinsert(&as_consumer_buffer_queue, &buffer->bq);
                }
             }
-
-#if KLDEBUG_LOOP
-         Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
-            my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
-#endif
-            break;
          }
 
 #if KLDEBUG_LOOP
