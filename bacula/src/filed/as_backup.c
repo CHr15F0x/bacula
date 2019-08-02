@@ -12,9 +12,9 @@
 
 
 
-#define KLDEBUG 1
-#define KLDEBUG_LOOP 1
-#define KLDEBUG_CONS_ENQUEUE 1
+#define KLDEBUG 0
+#define KLDEBUG_LOOP 0
+#define KLDEBUG_CONS_ENQUEUE 0
 
 
 

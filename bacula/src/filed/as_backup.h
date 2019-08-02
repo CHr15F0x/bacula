@@ -55,7 +55,7 @@ BQUEUE *qremove_wrapper(char *file, int line, char* headstr, BQUEUE *qhead)
 //
 // Producer related data structures
 //
-#define AS_PRODUCER_THREADS 4
+#define AS_PRODUCER_THREADS 2
 
 //
 // Data structures shared between producer threads and consumer thread

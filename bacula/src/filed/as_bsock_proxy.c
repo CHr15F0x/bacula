@@ -1,7 +1,7 @@
 #include "bacula.h"
 #include "as_bsock_proxy.h"
 
-#define KLDEBUG 1
+#define KLDEBUG 0
 
 AS_BSOCK_PROXY::AS_BSOCK_PROXY()
 {
