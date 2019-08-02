@@ -83,7 +83,7 @@ static void close_vss_backup_session(JCR *jcr);
 
 
 
-#define KLDEBUG 0
+#define KLDEBUG 1
 
 
 

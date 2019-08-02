@@ -12,10 +12,10 @@
 
 
 
-#define KLDEBUG 1
-#define KLDEBUG_LOOP 1
-#define KLDEBUG_CONS_ENQUEUE 1
-#define KLDEBUG_DEALLOC_BUFFERS 1
+#define KLDEBUG 0
+#define KLDEBUG_LOOP 0
+#define KLDEBUG_CONS_ENQUEUE 0
+#define KLDEBUG_DEALLOC_BUFFERS 0
 
 
 int my_thread_id()
@@ -474,18 +474,16 @@ void *as_workqueue_engine(void *arg)
 //
 
 bool as_consumer_thread_started = false;
+pthread_cond_t as_consumer_thread_started_cond = PTHREAD_COND_INITIALIZER;
 
 void as_wait_for_consumer_thread_started()
 {
-	bool started = false;
-
-	do
+	P(as_consumer_thread_lock);
+	while (as_consumer_thread_started == false)
 	{
-		   P(as_consumer_thread_lock);
-		   started = as_consumer_thread_started;
-		   V(as_consumer_thread_lock);
+	   pthread_cond_wait(&as_consumer_thread_started_cond, &as_consumer_thread_lock);
 	}
-	while (started == false);
+	V(as_consumer_thread_lock);
 }
 
 
@@ -497,7 +495,7 @@ bool as_quit_consumer_thread_loop()
    quit = as_consumer_thread_quit;
    V(as_consumer_thread_lock);
 
-   return (!quit);
+   return quit;
 }
 
 bool as_is_consumer_queue_empty(bool lockme)
@@ -567,11 +565,13 @@ void *as_consumer_thread_loop(void *arg)
    sd->clear_locking(); // TODO potrzebne?
 
 #if KLDEBUG_LOOP
-   Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() START, sock: %p\n", my_thread_id(), sd);
+   Pmsg3(50, "\t\t>>>> %4d as_consumer_thread_loop() START, sock: %p, as_quit_consumer_thread_loop(): %d\n",
+         my_thread_id(), sd, as_quit_consumer_thread_loop());
 #endif
 
    P(as_consumer_thread_lock);
    as_consumer_thread_started = true;
+   pthread_cond_signal(&as_consumer_thread_started_cond);
    V(as_consumer_thread_lock);
 
    as_buffer_t *buffer = NULL;
@@ -682,9 +682,8 @@ void *as_consumer_thread_loop(void *arg)
 #endif
       }
       V(as_consumer_queue_lock);
-
-#if 0
-      if (as_quit_consumer_thread_loop()) == false)
+#if 0 // To nie moze tu byc bo powoduje wyjscie z watku
+      if ((as_quit_consumer_thread_loop() == false) || (as_quit_consumer_thread_loop() && (as_is_consumer_queue_empty(false) == false)))
       {
          if (buffer)
          {
@@ -694,7 +693,6 @@ void *as_consumer_thread_loop(void *arg)
          return NULL;
       }
 #endif
-
       ASSERT(buffer);
       ASSERT(buffer->size > 0);
       ASSERT(buffer->size <= AS_BUFFER_CAPACITY);
@@ -834,7 +832,9 @@ void as_init_free_buffers_queue()
 
 void as_init_consumer_thread(BSOCK *sd)
 {
-	as_consumer_thread_quit = false;
+   P(as_consumer_thread_lock);
+   as_consumer_thread_quit = false;
+   V(as_consumer_thread_lock);
 
 	pthread_create(&as_consumer_thread, NULL, as_consumer_thread_loop, (void *)sd);
 
@@ -870,9 +870,6 @@ void as_init(BSOCK *sd, uint32_t buf_size)
 
 	as_init_free_buffers_queue();
 	as_init_consumer_thread(sd);
-
-	// wait for consumer thread started
-
 	as_wait_for_consumer_thread_started();
 
 	as_workqueue_init();
@@ -941,19 +938,13 @@ void as_dealloc_all_buffers()
    do
    {
       buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
-
-      ASSERT(buffer != NULL);
-
       if (buffer)
       {
-
-
 
 #if KLDEBUG_DEALLOC_BUFFERS
          Pmsg3(50, "\t\t>>>> %4d as_dealloc_all_buffers() CONS buffer: %d (%p)\n",
    	      my_thread_id(), buffer->id, buffer);
 #endif
-
 
     	  // Smart alloc does not allow free(NULL), which is inconsistent with how free works
          free(buffer);
@@ -996,7 +987,6 @@ void as_shutdown(BSOCK *sd)
 #endif
 
    as_workqueue_destroy();
-
    as_request_consumer_thread_quit();
    as_join_consumer_thread();
    as_dealloc_all_buffers();
