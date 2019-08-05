@@ -104,6 +104,15 @@ static void close_vss_backup_session(JCR *jcr);
  */
 bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
 {
+
+
+
+	// KLIS TEST NEED TO ATTACH
+	sleep(20);
+
+
+
+
    BSOCK *sd;
    bool ok = true;
    // TODO landonf: Allow user to specify encryption algorithm
@@ -736,7 +745,7 @@ int as_save_file(
 
 
 #if KLDEBUG
-   Pmsg2(50, "\t\t\t>>>> %4d as_save_file() file: %s\n", my_thread_id(), ff_pkt->fname);
+   Pmsg2(50, "\t\t\t>>>> %4d as_save_file() BEGIN file: %s\n", my_thread_id(), ff_pkt->fname);
 #endif
 
 
@@ -1198,6 +1207,10 @@ bail_out:
    if (sig) {
       crypto_sign_free(sig);
    }
+
+#if KLDEBUG
+   Pmsg2(50, "\t\t\t>>>> %4d as_save_file() END   file: %s\n", my_thread_id(), ff_pkt->fname);
+#endif
 
    // AS TODO zasygnalizować koniec przesyłania całego pliku do AS_BSOCK_PROXY
 #if AS_BACKUP

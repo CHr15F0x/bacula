@@ -125,9 +125,6 @@ bool AS_BSOCK_PROXY::send()
    /* The entire message will not fit into the buffer */
    while (as_buf->size + sizeof(to_send) + to_send > AS_BUFFER_CAPACITY)
    {
-	      Pmsg0(50, "\t\t>>>> BOOM! proxy\n");
-
-
       /* Check how much we can put into the current buffer */
       int32_t send_now = AS_BUFFER_CAPACITY - as_buf->size - sizeof(to_send);
 
