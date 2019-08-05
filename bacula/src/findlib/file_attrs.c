@@ -41,6 +41,15 @@
 #include "find.h"
 #include "ch.h"
 
+
+
+
+#define KLDEBUG 1
+
+
+
+
+
 static uid_t my_uid = 1;
 static gid_t my_gid = 1;
 static bool uid_set = false;
@@ -556,6 +565,10 @@ bool set_attributes(JCR *jcr, ATTR *attr, BFILE *ofd)
       my_gid = getgid();
       uid_set = true;
    }
+
+#if KLDEBUG
+   Pmsg2(50, "SET ATTR: %s %s\n", attr->fname, attr->ofname);
+#endif
 
    old_mask = umask(0);
    if (is_bopen(ofd)) {

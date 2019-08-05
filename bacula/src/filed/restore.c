@@ -25,6 +25,17 @@
 #include "ch.h"
 #include "restore.h"
 
+
+
+
+#define KLDEBUG_FILE_IDX 1
+
+
+
+
+
+
+
 #ifdef HAVE_DARWIN_OS
 #include <sys/attr.h>
 const bool have_darwin_os = true;
@@ -478,6 +489,11 @@ void do_restore(JCR *jcr)
       rctx.stream = rctx.full_stream & STREAMMASK_TYPE;
       Dmsg5(150, "Got hdr: Files=%d FilInx=%d size=%d Stream=%d, %s.\n",
             jcr->JobFiles, file_index, rctx.size, rctx.stream, stream_to_ascii(rctx.stream));
+
+#if KLDEBUG_FILE_IDX
+      Pmsg5(50, ">>>> RESTORE Files=%d FilInx=%d size=%d Stream=%d, %s.\n",
+            jcr->JobFiles, file_index, rctx.size, rctx.stream, stream_to_ascii(rctx.stream));
+#endif
 
       /*
        * Now we expect the Stream Data

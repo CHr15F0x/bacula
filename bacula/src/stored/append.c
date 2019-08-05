@@ -25,6 +25,7 @@
 
 
 #define KLDEBUG 0
+#define KLDEBUG_FILE_IDX 1
 
 
 
@@ -48,6 +49,10 @@ bool do_append_data(JCR *jcr)
    DCR *dcr = jcr->dcr;
    DEVICE *dev;
    char ec[50];
+
+
+   uint64_t total_stream_len;
+
 
 
    if (!dcr) {
@@ -192,6 +197,11 @@ bool do_append_data(JCR *jcr)
        *       grow during the backup.
        */
      if ((n=bget_msg(fd)) <= 0) {
+
+
+    	 total_stream_len = 0;
+
+
          if (n == BNET_SIGNAL && fd->msglen == BNET_EOD) {
             Dmsg0(200, "Got EOD on reading header.\n");
 
@@ -225,6 +235,16 @@ bool do_append_data(JCR *jcr)
 
       Dmsg3(890, "<filed: Header FilInx=%d stream=%d stream_len=%lld\n",
          file_index, stream, stream_len);
+
+
+#if KLDEBUG_FILE_IDX
+
+      total_stream_len += stream_len;
+
+      Pmsg6(50, ">>>> APPEND Files=%d FilInx=%d stream=%d stream_len=%lld tot_stream_len=%lld %s\n",
+    	jcr->JobFiles, file_index, stream, stream_len, total_stream_len, stream_to_ascii(stream));
+#endif
+
 
 #if KLDEBUG
       Pmsg3(50, "\t\t\t!!!! <filed: Header FilInx=%d stream=%d stream_len=%lld\n",
