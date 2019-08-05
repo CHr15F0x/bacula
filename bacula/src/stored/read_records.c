@@ -31,6 +31,9 @@
 #include "bacula.h"
 #include "stored.h"
 
+
+#define KLDEBUG 1
+
 /* Forward referenced functions */
 static void handle_session_record(DEVICE *dev, DEV_RECORD *rec, SESSION_LABEL *sessrec);
 static BSR *position_to_first_file(JCR *jcr, DCR *dcr);
@@ -62,6 +65,12 @@ bool read_records(DCR *dcr,
    SESSION_LABEL sessrec;
    dlist *recs;                         /* linked list of rec packets open */
 
+#ifdef KLDEBUG
+   Pmsg0(50, ">>>> READ RECORDS BEGIN\n");
+#endif
+
+
+
    recs = New(dlist(rec, &rec->link));
    position_to_first_file(jcr, dcr);
    jcr->mount_next_volume = false;
@@ -77,6 +86,11 @@ bool read_records(DCR *dcr,
             Jmsg(jcr, M_INFO, 0, _("End of Volume at file %u on device %s, Volume \"%s\"\n"),
                  dev->file, dev->print_name(), dcr->VolumeName);
             volume_unused(dcr);       /* mark volume unused */
+
+
+
+
+#if 0 // KLIS WTF EOT
             if (!mount_cb(dcr)) {
                Jmsg(jcr, M_INFO, 0, _("End of all volumes.\n"));
                ok = false;            /* Stop everything */
@@ -95,6 +109,8 @@ bool read_records(DCR *dcr,
                }
                break;
             }
+#endif
+
             jcr->mount_next_volume = false;
             /*
              * The Device can change at the end of a tape, so refresh it
@@ -292,6 +308,14 @@ bool read_records(DCR *dcr,
       Dmsg2(dbglvl, "After end recs in block. pos=%u:%u\n", dev->file, dev->block_num);
    } /* end for loop over blocks */
 // Dmsg2(dbglvl, "Position=(file:block) %u:%u\n", dev->file, dev->block_num);
+
+
+
+#ifdef KLDEBUG
+   Pmsg0(50, ">>>> READ RECORDS END\n");
+#endif
+
+
 
    /* Walk down list and free all remaining allocated recs */
    while (!recs->empty()) {

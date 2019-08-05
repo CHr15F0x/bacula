@@ -271,7 +271,7 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
 
    // Czy to jest potrzebne??
    // Moved to the start of consumer thread
-   // sd->clear_locking();
+   sd->clear_locking();
 
 
 #if KLDEBUG

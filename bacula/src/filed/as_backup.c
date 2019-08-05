@@ -792,6 +792,11 @@ void *as_consumer_thread_loop(void *arg)
    as_consumer_thread_started = false;
    V(as_consumer_thread_lock);
 
+
+
+   sd->set_locking(); // TODO potrzebne?
+
+
    return NULL;
 }
 

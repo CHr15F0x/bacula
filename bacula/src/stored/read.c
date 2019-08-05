@@ -23,6 +23,17 @@
 #include "bacula.h"
 #include "stored.h"
 
+
+
+
+
+
+
+#define KLDEBUG_FILE_IDX 1
+
+
+
+
 /* Forward referenced subroutines */
 static bool read_record_cb(DCR *dcr, DEV_RECORD *rec);
 static bool mac_record_cb(DCR *dcr, DEV_RECORD *rec);
@@ -45,15 +56,29 @@ bool do_read_data(JCR *jcr)
    DCR *dcr = jcr->read_dcr;
    char ec[50];
 
+#if KLDEBUG_FILE_IDX
+   Pmsg0(50, ">>> READ BEGIN\n");
+#endif
+
    Dmsg0(100, "Start read data.\n");
 
    if (!fd->set_buffer_size(dcr->device->max_network_buffer_size, BNET_SETBUF_WRITE)) {
+
+#if KLDEBUG_FILE_IDX
+   Pmsg0(50, ">>> READ END FAIL\n");
+#endif
+
       return false;
    }
 
    if (jcr->NumReadVolumes == 0) {
       Jmsg(jcr, M_FATAL, 0, _("No Volume names found for restore.\n"));
       fd->fsend(FD_error);
+
+#if KLDEBUG_FILE_IDX
+   Pmsg0(50, ">>> READ END FAIL\n");
+#endif
+
       return false;
    }
 
@@ -63,6 +88,11 @@ bool do_read_data(JCR *jcr)
    /* Ready device for reading */
    if (!acquire_device_for_read(dcr)) {
       fd->fsend(FD_error);
+
+#if KLDEBUG_FILE_IDX
+   Pmsg0(50, ">>> READ END FAIL\n");
+#endif
+
       return false;
    }
 
@@ -100,6 +130,12 @@ bool do_read_data(JCR *jcr)
       ok = false;
    }
 
+
+#if KLDEBUG_FILE_IDX
+   Pmsg0(50, ">>> READ END OK\n");
+#endif
+
+
    Dmsg0(30, "Done reading.\n");
    return ok;
 }
@@ -116,6 +152,14 @@ static bool read_record_cb(DCR *dcr, DEV_RECORD *rec)
    bool ok = true;
    POOLMEM *save_msg;
    char ec1[50], ec2[50];
+
+#if KLDEBUG_FILE_IDX
+   Pmsg5(50, ">>> READ RECORD CB SessId=%u SessTim=%u FI=%s Strm=%s, len=%d\n",
+      rec->VolSessionId, rec->VolSessionTime,
+      FI_to_ascii(ec1, rec->FileIndex),
+      stream_to_ascii(ec2, rec->Stream, rec->FileIndex),
+      rec->data_len);
+#endif
 
    if (rec->FileIndex < 0) {
       return true;
@@ -148,10 +192,19 @@ static bool read_record_cb(DCR *dcr, DEV_RECORD *rec)
       if (rec->VolSessionId != rec->last_VolSessionId ||
           rec->VolSessionTime != rec->last_VolSessionTime ||
           rec->FileIndex != rec->last_FileIndex) {
-         jcr->JobFiles++;
+
+#if KLDEBUG_FILE_IDX
+    	   Pmsg2(50, ">>> READ RECORD CB rec->FileIndex=%d !!== rec->last_FileIndex=%d\n",
+    		  rec->FileIndex, rec->last_FileIndex);
+#endif
+
+#if 0
+          jcr->JobFiles++; TODO KLIS WTF????
+
          rec->last_VolSessionId = rec->VolSessionId;
          rec->last_VolSessionTime = rec->VolSessionTime;
          rec->last_FileIndex = rec->FileIndex;
+#endif
       }
    }
 
@@ -194,6 +247,15 @@ static bool mac_record_cb(DCR *dcr, DEV_RECORD *rec)
       FI_to_ascii(buf1, rec->FileIndex), rec->VolSessionId,
       stream_to_ascii(buf2, rec->Stream, rec->FileIndex), rec->data_len);
 #endif
+
+#if KLDEBUG_FILE_IDX
+   Pmsg5(50, ">>> MAC  RECORD CB JobId=%d FI=%s SessId=%d Strm=%s len=%d\n",
+      jcr->JobId,
+      FI_to_ascii(buf1, rec->FileIndex), rec->VolSessionId,
+      stream_to_ascii(buf2, rec->Stream, rec->FileIndex), rec->data_len);
+#endif
+
+
 
    /* If label and not for us, discard it */
    if (rec->FileIndex < 0) {
