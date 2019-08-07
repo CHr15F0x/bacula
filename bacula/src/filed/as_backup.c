@@ -601,14 +601,56 @@ void *as_consumer_thread_loop(void *arg)
       {
          // Peek at the first elem
          buffer = (as_buffer_t *)qnext(&as_consumer_buffer_queue, NULL);
+
          if (buffer)
          {
+            // If this buffer refers to the next fileindex or the current one - ok
+            // If not - this buffer has to wait until last file idx is large enough
+            if (buffer->file_idx == last_file_idx)
+            {
+               // OK
+            }
+            else if (buffer->file_idx == last_file_idx + 1)
+            {
+               ++last_file_idx;
+               // OK
+            }
+            else
+            {
+               // buffer->file_idx > last_file_idx + 1
+               // Has to wait, find another one
+               while (buffer != NULL)
+               {
+                  buffer = (as_buffer_t *)qnext(&as_consumer_buffer_queue, &buffer->bq);
+
+                  if (buffer)
+                  {
+                     if (buffer->file_idx == last_file_idx)
+                     {
+                        // OK
+                        break;
+                     }
+                     else if (buffer->file_idx == last_file_idx + 1)
+                     {
+                        ++last_file_idx;
+                        // OK
+                        break;
+                     }
+                  }
+               }
+
+               // buffer can be NULL here
+            }
+
+            if (buffer)
+            {
             // If this is the first chunk of a bigger file - mark it
             if (as_bigfile_bsock_proxy == NULL)
             {
                as_bigfile_bsock_proxy = buffer->parent;
                // Dequeue this buffer
-               buffer = (as_buffer_t *)qremove(&as_consumer_buffer_queue);
+               // buffer = (as_buffer_t *)qremove(&as_consumer_buffer_queue);
+               buffer = (as_buffer_t *)qdchain(&buffer->bq);
 
 #if KLDEBUG_LOOP
          Pmsg7(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: %d fi: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
@@ -628,7 +670,9 @@ void *as_consumer_thread_loop(void *arg)
                      as_bigfile_bsock_proxy = NULL;
                   }
                   // Good to go
-                  buffer = (as_buffer_t *)qremove(&as_consumer_buffer_queue);
+                  //buffer = (as_buffer_t *)qremove(&as_consumer_buffer_queue);
+                  buffer = (as_buffer_t *)qdchain(&buffer->bq);
+
 #if KLDEBUG_LOOP
             Pmsg7(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: %d fi: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
                my_thread_id(), buffer->id, buffer->file_idx, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
@@ -669,6 +713,7 @@ void *as_consumer_thread_loop(void *arg)
                   }
                }
             }
+            } // buffer was null need to try again
          }
 
 #if KLDEBUG_LOOP
