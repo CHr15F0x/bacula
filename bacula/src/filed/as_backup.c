@@ -604,6 +604,9 @@ void *as_consumer_thread_loop(void *arg)
 
          if (buffer)
          {
+            // TODO moze dojsc do zaglodzenia - bufory z duzo wyzszym fi
+            // zabiora wszystkie bufory i bierzace fi nie ma sie z czego pozywic
+
             // If this buffer refers to the next fileindex or the current one - ok
             // If not - this buffer has to wait until last file idx is large enough
             if (buffer->file_idx == last_file_idx)
