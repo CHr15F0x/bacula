@@ -25,7 +25,7 @@
 
 
 #define KLDEBUG 0
-#define KLDEBUG_FILE_IDX 1
+#define KLDEBUG_FILE_IDX 0
 
 
 static const char *KL_stream_to_ascii(int stream)
@@ -414,6 +414,9 @@ bool do_append_data(JCR *jcr)
       }
 
      // TODO KLIS file indexes not coming in order right now
+     // TODO REMOVE IF 0
+      Pmsg2(50, "\t\t\t!!!! FI=%d from FD not positive or last_FI=%d\n", file_index, last_file_index);
+
 #if 0
       Jmsg2(jcr, M_FATAL, 0, _("FI=%d from FD not positive or last_FI=%d\n"),
             file_index, last_file_index);

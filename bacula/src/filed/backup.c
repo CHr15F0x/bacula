@@ -85,7 +85,7 @@ static void close_vss_backup_session(JCR *jcr);
 
 #define KLDEBUG 0
 
-#define KLDEBUG_FILE_IDX 1
+#define KLDEBUG_FILE_IDX 0
 
 
 
@@ -106,15 +106,6 @@ static void close_vss_backup_session(JCR *jcr);
  */
 bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
 {
-
-
-
-	// KLIS TEST NEED TO ATTACH
-	sleep(20);
-
-
-
-
    BSOCK *sd;
    bool ok = true;
    // TODO landonf: Allow user to specify encryption algorithm

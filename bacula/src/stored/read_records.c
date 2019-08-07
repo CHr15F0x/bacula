@@ -32,7 +32,7 @@
 #include "stored.h"
 
 
-#define KLDEBUG 1
+#define KLDEBUG 0
 
 /* Forward referenced functions */
 static void handle_session_record(DEVICE *dev, DEV_RECORD *rec, SESSION_LABEL *sessrec);
@@ -65,7 +65,7 @@ bool read_records(DCR *dcr,
    SESSION_LABEL sessrec;
    dlist *recs;                         /* linked list of rec packets open */
 
-#ifdef KLDEBUG
+#if KLDEBUG
    Pmsg0(50, ">>>> READ RECORDS BEGIN\n");
 #endif
 
@@ -90,7 +90,7 @@ bool read_records(DCR *dcr,
 
 
 
-#if 0 // KLIS WTF EOT
+#if 1 // KLIS WTF EOT
             if (!mount_cb(dcr)) {
                Jmsg(jcr, M_INFO, 0, _("End of all volumes.\n"));
                ok = false;            /* Stop everything */
@@ -99,6 +99,9 @@ bool read_records(DCR *dcr,
                 *  be properly updated because this is the last
                 *  tape.
                 */
+
+
+#if 1
                trec->FileIndex = EOT_LABEL;
                trec->File = dev->file;
                ok = record_cb(dcr, trec);
@@ -108,6 +111,7 @@ bool read_records(DCR *dcr,
                   dev->clear_eot();
                }
                break;
+#endif
             }
 #endif
 
@@ -311,7 +315,7 @@ bool read_records(DCR *dcr,
 
 
 
-#ifdef KLDEBUG
+#if KLDEBUG
    Pmsg0(50, ">>>> READ RECORDS END\n");
 #endif
 

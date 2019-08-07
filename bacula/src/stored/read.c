@@ -29,7 +29,7 @@
 
 
 
-#define KLDEBUG_FILE_IDX 1
+#define KLDEBUG_FILE_IDX 0
 
 
 
@@ -198,8 +198,8 @@ static bool read_record_cb(DCR *dcr, DEV_RECORD *rec)
     		  rec->FileIndex, rec->last_FileIndex);
 #endif
 
-#if 0
-          jcr->JobFiles++; TODO KLIS WTF????
+#if 1
+          jcr->JobFiles++; // TODO KLIS WTF????
 
          rec->last_VolSessionId = rec->VolSessionId;
          rec->last_VolSessionTime = rec->VolSessionTime;

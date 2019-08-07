@@ -860,9 +860,9 @@ static uint32_t as_initial_buf_size = 0;
 
 void as_init(BSOCK *sd, uint32_t buf_size)
 {
-#if KLDEBUG
+// #if KLDEBUG
    Pmsg2(50, "\t\t>>>> %4d as_init() sock: %p\n", my_thread_id(), sd);
-#endif
+// #endif
 
    // Store the pointer to the poolmem
    as_save_msg_pointer = sd->msg;
@@ -982,21 +982,19 @@ void as_workqueue_destroy()
 
 void as_shutdown(BSOCK *sd)
 {
-#if KLDEBUG
+//#if KLDEBUG
    Pmsg1(50, "\t\t>>>> %4d as_shutdown() BEGIN\n", my_thread_id());
-#endif
+//#endif
 
    as_workqueue_destroy();
-//   sleep(5);
    as_request_consumer_thread_quit();
-//   sleep(5);
    as_join_consumer_thread();
    as_dealloc_all_buffers();
 
    // Restore the pointer to the poolmem
    sd->msg = as_save_msg_pointer;
 
-#if KLDEBUG
+//#if KLDEBUG
    Pmsg1(50, "\t\t>>>> %4d as_shutdown() END\n", my_thread_id());
-#endif
+//#endif
 }
