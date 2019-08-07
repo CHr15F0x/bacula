@@ -26,6 +26,7 @@ public:
    bool fsend(const char *fmt, ...);
    bool signal(int signal);
    void finalize();
+   void update_fi(int file_idx);
    void cleanup();
    void destroy();
    const char *bstrerror();

@@ -55,7 +55,7 @@ BQUEUE *qremove_wrapper(char *file, int line, char* headstr, BQUEUE *qhead)
 //
 // Producer related data structures
 //
-#define AS_PRODUCER_THREADS 2
+#define AS_PRODUCER_THREADS 4
 
 //
 // Data structures shared between producer threads and consumer thread
@@ -72,6 +72,7 @@ struct as_buffer_t
    int id; // For testing
    AS_BSOCK_PROXY *parent; /** Only set when a total file trasfer size is bigger than one buffer */
    int final;
+   int file_idx;
 };
 
 //

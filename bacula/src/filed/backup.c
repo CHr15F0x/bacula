@@ -1915,6 +1915,8 @@ static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &
     * Send Attributes header to Storage daemon
     *    <file-index> <stream> <info>
     */
+   sd->update_fi(jcr_jobfiles_snapshot);
+
    if (!sd->fsend("%ld %d 0", jcr_jobfiles_snapshot, attr_stream)) {
       JCR_LOCK_SCOPE // TODO jcr->job status is volatile but not atomic
       if (!jcr->is_canceled()) {

@@ -259,6 +259,14 @@ void AS_BSOCK_PROXY::finalize()
    }
 }
 
+void AS_BSOCK_PROXY::update_fi(int file_idx)
+{
+	if (as_buf)
+	{
+		as_buf->file_idx = file_idx;
+	}
+}
+
 void AS_BSOCK_PROXY::cleanup()
 {
 #if KLDEBUG
