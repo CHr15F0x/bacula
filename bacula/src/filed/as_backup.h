@@ -61,7 +61,7 @@ BQUEUE *qremove_wrapper(char *file, int line, char* headstr, BQUEUE *qhead)
 // Data structures shared between producer threads and consumer thread
 //
 
-#define AS_BUFFERS (AS_PRODUCER_THREADS + 1)
+#define AS_BUFFERS (AS_PRODUCER_THREADS * 2)
 #define AS_BUFFER_CAPACITY 1024*1024*5
 
 struct as_buffer_t

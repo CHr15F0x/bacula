@@ -15,7 +15,7 @@ public:
 private:
 
    as_buffer_t *as_buf;
-   int allocated_size;
+   int file_idx;
 
 public:
 

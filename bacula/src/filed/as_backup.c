@@ -13,7 +13,7 @@
 
 
 #define KLDEBUG 0
-#define KLDEBUG_LOOP 0
+#define KLDEBUG_LOOP 1
 #define KLDEBUG_CONS_ENQUEUE 0
 #define KLDEBUG_DEALLOC_BUFFERS 0
 
@@ -47,12 +47,12 @@ static workq_t as_work_queue = { 0 };
 // Consumer related data structures
 //
 // AS TODO ten muteks jest tylko do wychodzenia z pętli wątku
+static pthread_mutex_t as_consumer_queue_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t as_consumer_thread_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static pthread_t as_consumer_thread = 0;
 
 static bool as_consumer_thread_quit = false;
-static pthread_mutex_t as_consumer_queue_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t as_consumer_queue_cond = PTHREAD_COND_INITIALIZER;
 
 static BQUEUE as_consumer_buffer_queue =
@@ -524,6 +524,7 @@ void as_release_buffer(as_buffer_t *buffer)
    buffer->size = 0;
    buffer->parent = NULL;
    buffer->final = 0;
+   buffer->file_idx = 0;
 #if 0
    BQUEUE bq;
    char data[AS_BUFFER_CAPACITY];
@@ -560,6 +561,9 @@ void as_release_buffer(as_buffer_t *buffer)
 
 void *as_consumer_thread_loop(void *arg)
 {
+   // Make sure that we're sending files in ascending order
+   int last_file_idx = 0;
+
    BSOCK *sd = (BSOCK *)arg;
 
    // Socket is ours now (todo check for sure)
@@ -607,8 +611,8 @@ void *as_consumer_thread_loop(void *arg)
                buffer = (as_buffer_t *)qremove(&as_consumer_buffer_queue);
 
 #if KLDEBUG_LOOP
-         Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
-            my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
+         Pmsg7(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: %d fi: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
+            my_thread_id(), buffer->id, buffer->file_idx, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
 #endif
          	   ASSERT(buffer);
                break;
@@ -626,8 +630,8 @@ void *as_consumer_thread_loop(void *arg)
                   // Good to go
                   buffer = (as_buffer_t *)qremove(&as_consumer_buffer_queue);
 #if KLDEBUG_LOOP
-         Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
-            my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
+            Pmsg7(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: %d fi: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
+               my_thread_id(), buffer->id, buffer->file_idx, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
 #endif
 
                   ASSERT(buffer);
@@ -656,8 +660,8 @@ void *as_consumer_thread_loop(void *arg)
                      // Good to go
                      buffer = (as_buffer_t *)qdchain(&buffer->bq);
    #if KLDEBUG_LOOP
-            Pmsg6(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
-               my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
+            Pmsg7(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: %d fi: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
+               my_thread_id(), buffer->id, buffer->file_idx, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
    #endif
 
                      ASSERT(buffer);
@@ -695,7 +699,7 @@ void *as_consumer_thread_loop(void *arg)
 
       int pos_in_buffer = 0;
 
-#if KLDEBUG_LOOP
+#if KLDEBUG_LOOP_SEND
       Pmsg8(50, "\t\t>>>> %4d as_consumer_thread_loop() START SENDING IN THIS ITER buf: %4d bufsize: %d parent: %4X (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
          my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent, to_send, pos_in_buffer, buffer->size);
 #endif
@@ -707,7 +711,7 @@ void *as_consumer_thread_loop(void *arg)
             memcpy(&to_send, &buffer->data[pos_in_buffer], sizeof(to_send));
             pos_in_buffer += sizeof(to_send);
 
-#if KLDEBUG_LOOP
+#if KLDEBUG_LOOP_SEND
             Pmsg8(50, "\t\t>>>> %4d GET_TO_SEND as_consumer_thread_loop() buf: %4d bufsize: %d parent: %4X (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
                my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent, to_send, pos_in_buffer, buffer->size);
 #endif
@@ -722,7 +726,7 @@ void *as_consumer_thread_loop(void *arg)
          if (pos_in_buffer + to_send > buffer->size)
          {
 
-#if KLDEBUG_LOOP
+#if KLDEBUG_LOOP_SEND
             Pmsg8(50, "\t\t>>>> %4d SEND_LESS_B as_consumer_thread_loop() buf: %4d bufsize: %d parent: %4X (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
             		my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent, to_send, pos_in_buffer, buffer->size);
 #endif
@@ -733,7 +737,7 @@ void *as_consumer_thread_loop(void *arg)
 
             to_send -= (buffer->size - pos_in_buffer);
 
-#if KLDEBUG_LOOP
+#if KLDEBUG_LOOP_SEND
             Pmsg8(50, "\t\t>>>> %4d SEND_LESS_E as_consumer_thread_loop() buf: %4d bufsize: %d parent: %4X (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
                   my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent, to_send, pos_in_buffer, buffer->size);
 #endif
@@ -745,7 +749,7 @@ void *as_consumer_thread_loop(void *arg)
 
          if ((to_send < 0) && (to_send != NEED_TO_INIT)) // signal
          {
-#if KLDEBUG_LOOP
+#if KLDEBUG_LOOP_SEND
             Pmsg8(50, "\t\t>>>> %4d SEND_SIGNAL as_consumer_thread_loop() buf: %4d bufsize: %d parent: %4X (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
                   my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent, to_send, pos_in_buffer, buffer->size);
 #endif
@@ -755,7 +759,7 @@ void *as_consumer_thread_loop(void *arg)
          }
          else if (to_send > 0)
          {
-#if KLDEBUG_LOOP
+#if KLDEBUG_LOOP_SEND
             Pmsg8(50, "\t\t>>>> %4d SEND_ENTIRE as_consumer_thread_loop() buf: %4d bufsize: %d parent: %4X (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
                   my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent, to_send, pos_in_buffer, buffer->size);
 #endif
@@ -771,7 +775,7 @@ void *as_consumer_thread_loop(void *arg)
          ASSERT(to_send != 0);
       }
 
-#if KLDEBUG_LOOP
+#if KLDEBUG_LOOP_SEND
       Pmsg8(50, "\t\t>>>> %4d END SENDING THIS ITER as_consumer_thread_loop() buf: %4d bufsize: %d parent: %4X (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
             my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent, to_send, pos_in_buffer, buffer->size);
 #endif

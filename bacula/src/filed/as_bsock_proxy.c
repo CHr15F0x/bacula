@@ -2,6 +2,7 @@
 #include "as_bsock_proxy.h"
 
 #define KLDEBUG 0
+#define KLDEBUG_FI 1
 
 AS_BSOCK_PROXY::AS_BSOCK_PROXY()
 {
@@ -47,6 +48,7 @@ bool AS_BSOCK_PROXY::send()
    if (as_buf == NULL)
    {
       as_buf = as_acquire_buffer(NULL);
+      as_buf->file_idx = file_idx;
 
 #if KLDEBUG
       Pmsg7(50, "\t\t>>>> %4d %4X AS_BSOCK_PROXY::send() NULL BUF GET NEW buf: %d bufsize: %4d parent: %4X msglen: %4d msg: %4d\n",
@@ -84,6 +86,7 @@ bool AS_BSOCK_PROXY::send()
 
       /* Get a new one which is already marked */ // TODO <<< na pewno?
       as_buf = as_acquire_buffer(this);
+      as_buf->file_idx = file_idx;
 
       ASSERT(as_buf != NULL);
       ASSERT(as_buf->size == 0);
@@ -153,6 +156,7 @@ bool AS_BSOCK_PROXY::send()
       as_consumer_enqueue_buffer(as_buf, false);
       /* Get a new one which is already marked */
       as_buf = as_acquire_buffer(this);
+      as_buf->file_idx = file_idx;
 
 #if KLDEBUG
       Pmsg7(50, "\t\t>>>> %4d %4X AS_BSOCK_PROXY::send() FULL GET NEW buf: %d bufsize: %4d parent: %4X msglen: %4d msg: %4d\n",
@@ -259,12 +263,9 @@ void AS_BSOCK_PROXY::finalize()
    }
 }
 
-void AS_BSOCK_PROXY::update_fi(int file_idx)
+void AS_BSOCK_PROXY::update_fi(int fi)
 {
-	if (as_buf)
-	{
-		as_buf->file_idx = file_idx;
-	}
+   file_idx = fi;
 }
 
 void AS_BSOCK_PROXY::cleanup()
