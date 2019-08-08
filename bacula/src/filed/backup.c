@@ -50,7 +50,7 @@ int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level);
 
 static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest, DIGEST *signature_digest
 #if AS_BACKUP
-      ,AS_BSOCK_PROXY *sd
+      , AS_BSOCK_PROXY *sd, int jcr_jobfiles
 #endif
 );
 
@@ -85,9 +85,7 @@ static void close_vss_backup_session(JCR *jcr);
 
 #define KLDEBUG 0
 
-#define KLDEBUG_FILE_IDX 0
-
-
+#define KLDEBUG_FI 1
 
 
 
@@ -874,7 +872,7 @@ int as_save_file(
       // AS TODO ta funkcja też ma pompować dane do bufora zamiast socketa
       stat = send_data(jcr, data_stream, ff_pkt, digest, signing_digest
 #if AS_BACKUP
-         ,sd
+         , sd, jcr_jobfiles
 #endif
       );
 
@@ -930,7 +928,7 @@ int as_save_file(
             }
             stat = send_data(jcr, rsrc_stream, ff_pkt, digest, signing_digest
 #if AS_BACKUP
-                  ,sd
+                  , sd, jcr_jobfiles
 #endif
             );
             // TODO uwaga - operujemy na kopii ff_pkt
@@ -943,12 +941,6 @@ int as_save_file(
          }
 
          Dmsg1(300, "Saving Finder Info for \"%s\"\n", ff_pkt->fname);
-
-#if 0
-         JCR_P
-		 int jcr_jobfiles = jcr->JobFiles;
-         JCR_V
-#endif
 
          sd->fsend("%ld %d 0", jcr_jobfiles, STREAM_HFSPLUS_ATTRIBUTES);
 
@@ -1064,11 +1056,6 @@ int as_save_file(
       }
 
       /** Send our header */
-#if 0
-      JCR_P
-	  int jcr_jobfiles = jcr->JobFiles;
-	  JCR_V
-#endif
 
 	  sd->fsend("%ld %ld 0", jcr_jobfiles, STREAM_SIGNED_DIGEST);
       Dmsg1(300, "bfiled>stored:header %s\n", sd->msg);
@@ -1088,12 +1075,6 @@ int as_save_file(
    /** Terminate any digest and send it to Storage daemon */
    if (digest) {
       uint32_t size;
-
-#if 0
-      JCR_P
-	  int jcr_jobfiles = jcr->JobFiles;
-	  JCR_V
-#endif
 
       sd->fsend("%ld %d 0", jcr_jobfiles, digest_stream);
       Dmsg1(300, "bfiled>stored:header %s\n", sd->msg);
@@ -1127,12 +1108,6 @@ int as_save_file(
    /* Check if original file has a digest, and send it */
    if (ff_pkt->type == FT_LNKSAVED && ff_pkt->digest) {
       Dmsg2(300, "Link %s digest %d\n", ff_pkt->fname, ff_pkt->digest_len);
-
-#if 0
-      JCR_P
-	  int jcr_jobfiles = jcr->JobFiles;
-	  JCR_V
-#endif
 
       sd->fsend("%ld %d 0", jcr_jobfiles, ff_pkt->digest_stream);
 
@@ -1228,7 +1203,7 @@ bail_out:
 static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
                      DIGEST *signing_digest
 #if AS_BACKUP
-   ,AS_BSOCK_PROXY *sd
+   , AS_BSOCK_PROXY *sd, int jcr_jobfiles
 #endif
 )
 {
@@ -1247,10 +1222,6 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
 #ifdef FD_NO_SEND_TEST
    return 1;
 #endif
-
-
-   int jcr_jobfiles = 0;
-
 
    msgsave = sd->msg;
    rbuf = sd->msg;                    /* read buffer */
@@ -1371,11 +1342,6 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
     * Send Data header to Storage daemon
     *    <file-index> <stream> <expected stream length>
     */
-
-   JCR_P
-   jcr_jobfiles = jcr->JobFiles;
-   JCR_V
-
    if (!sd->fsend("%ld %d %lld", jcr_jobfiles, stream,
         (int64_t)ff_pkt->statp.st_size)) {
       // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
@@ -1916,6 +1882,10 @@ static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &
     *    <file-index> <stream> <info>
     */
    sd->update_fi(jcr_jobfiles_snapshot);
+
+#if KLDEBUG_FI
+   Pmsg1(50, ">>>> SEND FI: %d\n", jcr_jobfiles_snapshot);
+#endif
 
    if (!sd->fsend("%ld %d 0", jcr_jobfiles_snapshot, attr_stream)) {
       JCR_LOCK_SCOPE // TODO jcr->job status is volatile but not atomic

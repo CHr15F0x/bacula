@@ -13,10 +13,13 @@
 
 
 #define KLDEBUG 0
-#define KLDEBUG_LOOP 1
+#define KLDEBUG_LOOP 0
 #define KLDEBUG_CONS_ENQUEUE 0
 #define KLDEBUG_DEALLOC_BUFFERS 0
 
+#define KLDEBUG_FI 1
+#define KLDEBUG_LOOP_DEQUEUE 1
+#define KLDEBUG_INIT_SHUT 1
 
 int my_thread_id()
 {
@@ -185,6 +188,12 @@ void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
       // This was the last buffer for this big file
       buffer->final = finalize;
    }
+
+#if KLDEBUG_FI
+    Pmsg6(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d (%p), FI: %d bigfile: %4X, cons.q.size: %d\n",
+       my_thread_id(), buffer->id, buffer, buffer->file_idx, HH(as_bigfile_bsock_proxy),
+       qsize(&as_consumer_buffer_queue));
+#endif
 
    QINSERT(&as_consumer_buffer_queue, &buffer->bq);
 
@@ -740,6 +749,13 @@ void *as_consumer_thread_loop(void *arg)
          // To znaczy ze wychodzimy z watku
          return NULL;
       }
+      else
+      {
+#if KLDEBUG_LOOP_DEQUEUE
+         Pmsg7(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: %d fi: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
+            my_thread_id(), buffer->id, buffer->file_idx, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
+#endif
+      }
 
       ASSERT(buffer);
       ASSERT(buffer->size > 0);
@@ -913,9 +929,9 @@ static uint32_t as_initial_buf_size = 0;
 
 void as_init(BSOCK *sd, uint32_t buf_size)
 {
-// #if KLDEBUG
+#if KLDEBUG_INIT_SHUT
    Pmsg2(50, "\t\t>>>> %4d as_init() sock: %p\n", my_thread_id(), sd);
-// #endif
+#endif
 
    // Store the pointer to the poolmem
    as_save_msg_pointer = sd->msg;
@@ -1035,9 +1051,9 @@ void as_workqueue_destroy()
 
 void as_shutdown(BSOCK *sd)
 {
-//#if KLDEBUG
+#if KLDEBUG_INIT_SHUT
    Pmsg1(50, "\t\t>>>> %4d as_shutdown() BEGIN\n", my_thread_id());
-//#endif
+#endif
 
    as_workqueue_destroy();
    as_request_consumer_thread_quit();
@@ -1047,7 +1063,7 @@ void as_shutdown(BSOCK *sd)
    // Restore the pointer to the poolmem
    sd->msg = as_save_msg_pointer;
 
-//#if KLDEBUG
+#if KLDEBUG_INIT_SHUT
    Pmsg1(50, "\t\t>>>> %4d as_shutdown() END\n", my_thread_id());
-//#endif
+#endif
 }
