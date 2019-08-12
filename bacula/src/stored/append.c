@@ -417,7 +417,7 @@ bool do_append_data(JCR *jcr)
      // TODO REMOVE IF 0
       Pmsg2(50, "\t\t\t!!!! FI=%d from FD not positive or last_FI=%d\n", file_index, last_file_index);
 
-#if 0
+#if 1
       Jmsg2(jcr, M_FATAL, 0, _("FI=%d from FD not positive or last_FI=%d\n"),
             file_index, last_file_index);
       ok = false;

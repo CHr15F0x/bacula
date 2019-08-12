@@ -28,7 +28,7 @@
 
 
 
-#define KLDEBUG_FILE_IDX 1
+#define KLDEBUG_FILE_IDX 0
 
 
 
