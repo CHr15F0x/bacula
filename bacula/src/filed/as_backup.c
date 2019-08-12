@@ -193,7 +193,6 @@ void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
     Pmsg7(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d, FI: %d parent: %4X bigfile: %4X, final: %d cons.q.size: %d\n",
        my_thread_id(), buffer->id, buffer->file_idx, HH(buffer->parent), HH(as_bigfile_bsock_proxy),
 	   buffer->final, qsize(&as_consumer_buffer_queue));
-    dump_consumer_queue();
 #endif
 
    QINSERT(&as_consumer_buffer_queue, &buffer->bq);
@@ -683,7 +682,7 @@ void *as_consumer_thread_loop(void *arg)
                   if (buffer->final)
                   {
                      as_bigfile_bsock_proxy = NULL;
-                     buffer->final = 0;
+                     // buffer->final = 0;
                   }
                   // Good to go
                   //buffer = (as_buffer_t *)qremove(&as_consumer_buffer_queue);
@@ -716,7 +715,7 @@ void *as_consumer_thread_loop(void *arg)
                      if (buffer->final)
                      {
                         as_bigfile_bsock_proxy = NULL;
-                        buffer->final = 0;
+                        // buffer->final = 0;
                      }
                      // Good to go
                      buffer = (as_buffer_t *)qdchain(&buffer->bq);
@@ -760,10 +759,6 @@ void *as_consumer_thread_loop(void *arg)
          Pmsg8(50, "\t\t>>>> %4d as_consumer_thread_loop() DQ %d, FI: %d parent: %4X bigfile: %4X, final: %d cons.q.size: %d LAST_FI: %d\n",
             my_thread_id(), buffer->id, buffer->file_idx, HH(buffer->parent), HH(as_bigfile_bsock_proxy),
             buffer->final, qsize(&as_consumer_buffer_queue), last_file_idx);
-
-         P(as_consumer_queue_lock);
-         dump_consumer_queue();
-         V(as_consumer_queue_lock);
 #endif
       }
 
