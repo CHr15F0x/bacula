@@ -186,13 +186,14 @@ void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
    if (finalize)
    {
       // This was the last buffer for this big file
-      buffer->final = finalize;
+      buffer->final = 1;
    }
 
 #if KLDEBUG_FI
-    Pmsg6(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d (%p), FI: %d bigfile: %4X, cons.q.size: %d\n",
-       my_thread_id(), buffer->id, buffer, buffer->file_idx, HH(as_bigfile_bsock_proxy),
-       qsize(&as_consumer_buffer_queue));
+    Pmsg7(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d, FI: %d parent: %4X bigfile: %4X, final: %d cons.q.size: %d\n",
+       my_thread_id(), buffer->id, buffer->file_idx, HH(buffer->parent), HH(as_bigfile_bsock_proxy),
+	   buffer->final, qsize(&as_consumer_buffer_queue));
+    dump_consumer_queue();
 #endif
 
    QINSERT(&as_consumer_buffer_queue, &buffer->bq);
@@ -622,7 +623,8 @@ void *as_consumer_thread_loop(void *arg)
             {
                // OK
             }
-            else if (buffer->file_idx == last_file_idx + 1)
+            // We may only increment if the current big file is done
+            else if ((buffer->file_idx == last_file_idx + 1) && (as_bigfile_bsock_proxy == NULL))
             {
                ++last_file_idx;
                // OK
@@ -642,7 +644,8 @@ void *as_consumer_thread_loop(void *arg)
                         // OK
                         break;
                      }
-                     else if (buffer->file_idx == last_file_idx + 1)
+                     // We may only increment if the current big file is done
+                     else if ((buffer->file_idx == last_file_idx + 1) && (as_bigfile_bsock_proxy == NULL))
                      {
                         ++last_file_idx;
                         // OK
@@ -680,6 +683,7 @@ void *as_consumer_thread_loop(void *arg)
                   if (buffer->final)
                   {
                      as_bigfile_bsock_proxy = NULL;
+                     buffer->final = 0;
                   }
                   // Good to go
                   //buffer = (as_buffer_t *)qremove(&as_consumer_buffer_queue);
@@ -712,6 +716,7 @@ void *as_consumer_thread_loop(void *arg)
                      if (buffer->final)
                      {
                         as_bigfile_bsock_proxy = NULL;
+                        buffer->final = 0;
                      }
                      // Good to go
                      buffer = (as_buffer_t *)qdchain(&buffer->bq);
@@ -752,10 +757,18 @@ void *as_consumer_thread_loop(void *arg)
       else
       {
 #if KLDEBUG_LOOP_DEQUEUE
-         Pmsg7(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: %d fi: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
-            my_thread_id(), buffer->id, buffer->file_idx, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
+         Pmsg8(50, "\t\t>>>> %4d as_consumer_thread_loop() DQ %d, FI: %d parent: %4X bigfile: %4X, final: %d cons.q.size: %d LAST_FI: %d\n",
+            my_thread_id(), buffer->id, buffer->file_idx, HH(buffer->parent), HH(as_bigfile_bsock_proxy),
+            buffer->final, qsize(&as_consumer_buffer_queue), last_file_idx);
+
+         P(as_consumer_queue_lock);
+         dump_consumer_queue();
+         V(as_consumer_queue_lock);
 #endif
       }
+
+
+
 
       ASSERT(buffer);
       ASSERT(buffer->size > 0);
@@ -888,6 +901,9 @@ void as_init_free_buffers_queue()
    {
       buffer = (as_buffer_t *)malloc(sizeof(as_buffer_t));
       buffer->id = AS_BUFFER_BASE + i;
+      buffer->size = 0;
+      buffer->parent = NULL;
+      buffer->final = 0;
       QINSERT(&as_free_buffer_queue, &buffer->bq);
    }
 
