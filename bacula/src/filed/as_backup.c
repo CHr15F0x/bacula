@@ -637,7 +637,7 @@ void *as_consumer_thread_loop(void *arg)
 
    as_buffer_t *buffer = NULL;
 
-#define NEED_TO_INIT -9999
+#define NEED_TO_INIT INT32_MIN
 
    int32_t to_send = NEED_TO_INIT;
 
