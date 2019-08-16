@@ -122,6 +122,7 @@ as_buffer_t *as_acquire_buffer(AS_BSOCK_PROXY *parent)
          buffer->parent = parent;
          buffer->size = 0;
          buffer->file_idx = 0;
+         buffer->final = 0;
 
 #if KLDEBUG
          Pmsg4(50, "\t\t>>>> %4d as_acquire_buffer() END parent: %4X, free size: %d, buf: %d\n",
