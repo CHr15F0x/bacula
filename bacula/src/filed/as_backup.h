@@ -79,7 +79,7 @@ struct as_buffer_t
 // Producer loop
 //
 
-as_buffer_t *as_acquire_buffer(AS_BSOCK_PROXY *parent);
+as_buffer_t *as_acquire_buffer(AS_BSOCK_PROXY *parent, int file_idx);
 void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize);
 int as_workqueue_engine_quit();
 

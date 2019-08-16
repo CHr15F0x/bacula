@@ -17,11 +17,11 @@
 #define KLDEBUG_CONS_ENQUEUE 0
 #define KLDEBUG_DEALLOC_BUFFERS 0
 
-#define KLDEBUG_CONS_QUEUE 1
+#define KLDEBUG_CONS_QUEUE 0
 
 
-#define KLDEBUG_FI 1
-#define KLDEBUG_LOOP_DEQUEUE 1
+#define KLDEBUG_FI 0
+#define KLDEBUG_LOOP_DEQUEUE 0
 #define KLDEBUG_INIT_SHUT 0
 
 int my_thread_id()
@@ -69,7 +69,9 @@ static BQUEUE as_consumer_buffer_queue =
 
 static AS_BSOCK_PROXY *as_bigfile_bsock_proxy = NULL;
 static as_buffer_t *as_bigfile_buffer_only = NULL;
-
+static as_buffer_t *as_fix_fi_order_buffer = NULL;
+// Make sure that we're sending files in ascending order
+int as_last_file_idx = 0;
 
 
 //
@@ -87,11 +89,30 @@ static BQUEUE as_free_buffer_queue =
    &as_free_buffer_queue
 };
 
+int as_smallest_fi_in_consumer_queue()
+{
+   int smallest_fi = INT_MAX;
+
+   as_buffer_t *buffer = (as_buffer_t *)qnext(&as_consumer_buffer_queue, NULL);
+
+   while (buffer)
+   {
+      if (buffer->file_idx < smallest_fi)
+      {
+         smallest_fi = buffer->file_idx;
+      }
+
+      buffer = (as_buffer_t *)qnext(&as_consumer_buffer_queue, &buffer->bq);
+   }
+
+   return smallest_fi;
+}
+
 //
 // Producer loop
 //
 
-as_buffer_t *as_acquire_buffer(AS_BSOCK_PROXY *parent)
+as_buffer_t *as_acquire_buffer(AS_BSOCK_PROXY *parent, int file_idx)
 {
 #if KLDEBUG
    Pmsg2(50, "\t\t>>>> %4d as_acquire_buffer() BEGIN parent: %4X\n",
@@ -105,7 +126,16 @@ as_buffer_t *as_acquire_buffer(AS_BSOCK_PROXY *parent)
    while (1) // TODO check for quit
    {
       P(as_consumer_queue_lock);
-      if ((as_bigfile_bsock_proxy != NULL) && (as_bigfile_bsock_proxy == parent))
+
+      if ((qsize(&as_consumer_buffer_queue) == AS_BUFFERS) &&
+          (as_smallest_fi_in_consumer_queue() > as_last_file_idx + 1) &&
+          (file_idx == as_last_file_idx + 1))
+      {
+         buffer = as_fix_fi_order_buffer;
+         as_fix_fi_order_buffer = NULL;
+         V(as_consumer_queue_lock);
+      }
+      else if ((as_bigfile_bsock_proxy != NULL) && (as_bigfile_bsock_proxy == parent))
       {
          buffer = as_bigfile_buffer_only; // Can already be null
          as_bigfile_buffer_only = NULL;
@@ -207,7 +237,7 @@ void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
    }
 
 #if KLDEBUG_FI
-    Pmsg7(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d, FI: %4d parent: %4X bigfile: %4X, final: %d cons.q.size: %d\n",
+    Pmsg7(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d FI: %4d parent: %4X bigfile: %4X, final: %d cons.q.size: %d\n",
        my_thread_id(), buffer->id, buffer->file_idx, HH(buffer->parent), HH(as_bigfile_bsock_proxy),
 	   buffer->final, qsize(&as_consumer_buffer_queue));
 #endif
@@ -559,7 +589,11 @@ void as_release_buffer(as_buffer_t *buffer)
    AS_BSOCK_PROXY *parent; /** Only set when a total file trasfer size is bigger than one buffer */
 #endif
 
-   if (as_bigfile_buffer_only == NULL)
+   if (as_fix_fi_order_buffer == NULL)
+   {
+      as_fix_fi_order_buffer = buffer;
+   }
+   else if (as_bigfile_buffer_only == NULL)
    {
       as_bigfile_buffer_only = buffer;
    }
@@ -584,12 +618,8 @@ void as_release_buffer(as_buffer_t *buffer)
 // TODO AS_BSOCK_PROXY - use as_buffers directly! (da sie tak?)
 //
 //
-
 void *as_consumer_thread_loop(void *arg)
 {
-   // Make sure that we're sending files in ascending order
-   int last_file_idx = 0;
-
    BSOCK *sd = (BSOCK *)arg;
 
    // Socket is ours now (todo check for sure)
@@ -635,14 +665,14 @@ void *as_consumer_thread_loop(void *arg)
 
             // If this buffer refers to the next fileindex or the current one - ok
             // If not - this buffer has to wait until last file idx is large enough
-            if (buffer->file_idx == last_file_idx)
+            if (buffer->file_idx == as_last_file_idx)
             {
                // OK
             }
             // We may only increment if the current big file is done
-            else if ((buffer->file_idx == last_file_idx + 1) && (as_bigfile_bsock_proxy == NULL))
+            else if ((buffer->file_idx == as_last_file_idx + 1) && (as_bigfile_bsock_proxy == NULL))
             {
-               ++last_file_idx;
+               ++as_last_file_idx;
                // OK
             }
             else
@@ -655,15 +685,15 @@ void *as_consumer_thread_loop(void *arg)
 
                   if (buffer)
                   {
-                     if (buffer->file_idx == last_file_idx)
+                     if (buffer->file_idx == as_last_file_idx)
                      {
                         // OK
                         break;
                      }
                      // We may only increment if the current big file is done
-                     else if ((buffer->file_idx == last_file_idx + 1) && (as_bigfile_bsock_proxy == NULL))
+                     else if ((buffer->file_idx == as_last_file_idx + 1) && (as_bigfile_bsock_proxy == NULL))
                      {
-                        ++last_file_idx;
+                        ++as_last_file_idx;
                         // OK
                         break;
                      }
@@ -775,7 +805,7 @@ void *as_consumer_thread_loop(void *arg)
 #if KLDEBUG_LOOP_DEQUEUE
          Pmsg8(50, "\t\t>>>> %4d as_consumer_thread_loop() DQ %d, FI: %d parent: %4X bigfile: %4X, final: %d cons.q.size: %d LAST_FI: %d\n",
             my_thread_id(), buffer->id, buffer->file_idx, HH(buffer->parent), HH(as_bigfile_bsock_proxy),
-            buffer->final, qsize(&as_consumer_buffer_queue), last_file_idx);
+            buffer->final, qsize(&as_consumer_buffer_queue), as_last_file_idx);
 #endif
       }
 
@@ -922,9 +952,14 @@ void as_init_free_buffers_queue()
    ASSERT(AS_BUFFERS == qsize(&as_free_buffer_queue));
 
    as_bigfile_buffer_only = (as_buffer_t *)malloc(sizeof(as_buffer_t));
-   as_bigfile_buffer_only->id = AS_BUFFER_BASE + 999;
+   as_bigfile_buffer_only->id = AS_BUFFER_BASE + 998;
 
    ASSERT(as_bigfile_buffer_only != NULL);
+
+   as_fix_fi_order_buffer = (as_buffer_t *)malloc(sizeof(as_buffer_t));
+   as_fix_fi_order_buffer->id = AS_BUFFER_BASE + 999;
+
+   ASSERT(as_fix_fi_order_buffer != NULL);
 }
 
 void as_init_consumer_thread(BSOCK *sd)
@@ -1057,6 +1092,21 @@ void as_dealloc_all_buffers()
 
 
       free(as_bigfile_buffer_only);
+
+      as_bigfile_buffer_only = NULL;
+   }
+
+   if (as_fix_fi_order_buffer)
+   {
+#if KLDEBUG_DEALLOC_BUFFERS
+      Pmsg3(50, "\t\t>>>> %4d as_dealloc_all_buffers() FI FIX buffer: %d (%p)\n",
+         my_thread_id(), as_fix_fi_order_buffer->id, as_bigfile_buffer_only);
+#endif
+
+
+      free(as_fix_fi_order_buffer);
+
+      as_fix_fi_order_buffer = NULL;
    }
 
 #if KLDEBUG_DEALLOC_BUFFERS
@@ -1090,6 +1140,12 @@ void as_shutdown(BSOCK *sd)
 
    // Restore the pointer to the poolmem
    sd->msg = as_save_msg_pointer;
+
+   // Clear remainig statics
+   as_consumer_thread_quit = false;
+   as_bigfile_bsock_proxy = NULL;
+   as_consumer_thread_started = false;
+   as_last_file_idx = 0;
 
 #if KLDEBUG_INIT_SHUT
    Pmsg1(50, "\t\t>>>> %4d as_shutdown() END\n", my_thread_id());

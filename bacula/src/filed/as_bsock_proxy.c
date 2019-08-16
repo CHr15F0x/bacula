@@ -2,7 +2,7 @@
 #include "as_bsock_proxy.h"
 
 #define KLDEBUG 0
-#define KLDEBUG_FI 1
+#define KLDEBUG_FI 0
 
 AS_BSOCK_PROXY::AS_BSOCK_PROXY()
 {
@@ -47,7 +47,7 @@ bool AS_BSOCK_PROXY::send()
    /* New file to be sent */
    if (as_buf == NULL)
    {
-      as_buf = as_acquire_buffer(NULL);
+      as_buf = as_acquire_buffer(NULL, file_idx);
       as_buf->file_idx = file_idx;
 
 #if KLDEBUG
@@ -85,7 +85,7 @@ bool AS_BSOCK_PROXY::send()
 
 
       /* Get a new one which is already marked */ // TODO <<< na pewno?
-      as_buf = as_acquire_buffer(this);
+      as_buf = as_acquire_buffer(this, file_idx);
       as_buf->file_idx = file_idx;
 
       ASSERT(as_buf != NULL);
@@ -155,7 +155,7 @@ bool AS_BSOCK_PROXY::send()
 
       as_consumer_enqueue_buffer(as_buf, false);
       /* Get a new one which is already marked */
-      as_buf = as_acquire_buffer(this);
+      as_buf = as_acquire_buffer(this, file_idx);
       as_buf->file_idx = file_idx;
 
 #if KLDEBUG

@@ -85,9 +85,9 @@ static void close_vss_backup_session(JCR *jcr);
 
 #define KLDEBUG 0
 
-#define KLDEBUG_FI 1
+#define KLDEBUG_FI 0
 
-#define KLDEBUG_AS_SAVE_FILE 1
+#define KLDEBUG_AS_SAVE_FILE 0
 
 
 /**
