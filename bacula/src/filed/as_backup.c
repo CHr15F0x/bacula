@@ -18,7 +18,18 @@ int my_thread_id()
    return H(pthread_self());
 }
 
+/* Producer stuff */
 static workq_t as_work_queue = { 0 };
+static POOLMEM *as_save_msg_pointer = NULL;
+static uint32_t as_initial_buf_size = 0;
+static pthread_mutex_t as_buffer_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t as_buffer_cond = PTHREAD_COND_INITIALIZER;
+static BQUEUE as_free_buffer_queue =
+{
+   &as_free_buffer_queue,
+   &as_free_buffer_queue
+};
+/* Consumer stuff */
 static pthread_mutex_t as_consumer_queue_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t as_consumer_thread_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_t as_consumer_thread = 0;
@@ -33,23 +44,8 @@ static AS_BSOCK_PROXY *as_bigfile_bsock_proxy = NULL;
 static as_buffer_t *as_bigfile_buffer_only = NULL;
 static as_buffer_t *as_fix_fi_order_buffer = NULL;
 static int as_last_file_idx = 0;
-static pthread_mutex_t as_buffer_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t as_buffer_cond = PTHREAD_COND_INITIALIZER;
-static BQUEUE as_free_buffer_queue =
-{
-   &as_free_buffer_queue,
-   &as_free_buffer_queue
-};
 static bool as_consumer_thread_started = false;
 static pthread_cond_t as_consumer_thread_started_cond = PTHREAD_COND_INITIALIZER;
-static POOLMEM *as_save_msg_pointer = NULL;
-static uint32_t as_initial_buf_size = 0;
-
-
-
-
-
-
 
 int as_smallest_fi_in_consumer_queue()
 {
@@ -106,7 +102,7 @@ as_buffer_t *as_acquire_buffer(AS_BSOCK_PROXY *parent, int file_idx)
       else
       {
          V(as_consumer_queue_lock);
-         buffer = (as_buffer_t *)QREMOVE(&as_free_buffer_queue);
+         buffer = (as_buffer_t *)qremove(&as_free_buffer_queue);
       }
 
       if (buffer)
@@ -204,7 +200,7 @@ void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
 	   buffer->final, qsize(&as_consumer_buffer_queue));
 #endif
 
-   QINSERT(&as_consumer_buffer_queue, &buffer->bq);
+   qinsert(&as_consumer_buffer_queue, &buffer->bq);
 
 #if KLDEBUG_CONS_ENQUEUE
     Pmsg5(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d (%p), END   bigfile: %4X, cons.q.size: %d\n",
@@ -540,13 +536,6 @@ void as_release_buffer(as_buffer_t *buffer)
    buffer->parent = NULL;
    buffer->final = 0;
    buffer->file_idx = 0;
-#if 0
-   BQUEUE bq;
-   char data[AS_BUFFER_CAPACITY];
-   int32_t size;
-   int id; // For testing
-   AS_BSOCK_PROXY *parent; /** Only set when a total file trasfer size is bigger than one buffer */
-#endif
 
    if (as_fix_fi_order_buffer == NULL)
    {
@@ -558,7 +547,7 @@ void as_release_buffer(as_buffer_t *buffer)
    }
    else
    {
-      QINSERT(&as_free_buffer_queue, &buffer->bq);
+      qinsert(&as_free_buffer_queue, &buffer->bq);
    }
 
    V(as_buffer_lock);
@@ -905,7 +894,7 @@ void as_init_free_buffers_queue()
       buffer->size = 0;
       buffer->parent = NULL;
       buffer->final = 0;
-      QINSERT(&as_free_buffer_queue, &buffer->bq);
+      qinsert(&as_free_buffer_queue, &buffer->bq);
    }
 
    ASSERT(AS_BUFFERS == qsize(&as_free_buffer_queue));
@@ -1009,7 +998,7 @@ void as_dealloc_all_buffers()
 
    do
    {
-      buffer = (as_buffer_t *)QREMOVE(&as_free_buffer_queue);
+      buffer = (as_buffer_t *)qremove(&as_free_buffer_queue);
       if (buffer)
       {
 #if KLDEBUG_DEALLOC_BUFFERS
@@ -1025,7 +1014,7 @@ void as_dealloc_all_buffers()
 
    do
    {
-      buffer = (as_buffer_t *)QREMOVE(&as_consumer_buffer_queue);
+      buffer = (as_buffer_t *)qremove(&as_consumer_buffer_queue);
       if (buffer)
       {
 

@@ -6,15 +6,6 @@ typedef struct Digest DIGEST;
 struct FF_PKT;
 struct JCR;
 
-// TODO cześć to lokalne funkcje i powinny wylecieć z headera
-
-//
-// AS TODO
-// condition variables for buffers which are ready to be used
-// or buffers which can be consumed by the consumer thread
-//
-
-
 #define H(x) (int)((unsigned char)( \
       ((unsigned long)x >> 0) ^ ((unsigned long)x >> 1) ^ \
       ((unsigned long)x >> 2) ^ ((unsigned long)x >> 3) ^ \
@@ -29,28 +20,8 @@ struct JCR;
 int my_thread_id();
 int thread_id(pthread_t pth_id);
 
-
-
-
-
-
-
-
 #define AS_DEBUG 0
 #define AS_BUFFER_BASE 1000
-
-#if AS_DEBUG
-#define QINSERT(head, object)    { Pmsg4(50, ">>>> QINSERT %s %d %s %s\n", __FILE__, __LINE__, #head, #object); qinsert(head, object); }
-BQUEUE *qremove_wrapper(char *file, int line, char* headstr, BQUEUE *qhead)
-{
-   Pmsg3(50, ">>>> QREMOVE %s %d %s\n", file, line, headstr);
-   return qremove(qhead);
-}
-#define QREMOVE(head) qremove_wrapper(__FILE__, __LINE__, #head, head)
-#else
-#define QINSERT qinsert
-#define QREMOVE qremove
-#endif // !AS_DEBUG
 
 //
 // Producer related data structures
