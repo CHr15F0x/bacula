@@ -420,6 +420,9 @@ public:
    bool multi_restore;                /* Dir can do multiple storage restore */
    htable *file_list;                 /* Previous file list (accurate mode) */
    uint64_t base_size;                /* compute space saved with base job */
+#if AS_BACKUP
+   AS_ENGINE *ase;
+#endif /* AS_BACKUP */
 #endif /* FILE_DAEMON */
 
 

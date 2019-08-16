@@ -4,20 +4,14 @@
 #define KLDEBUG 0
 #define KLDEBUG_FI 0
 
-AS_BSOCK_PROXY::AS_BSOCK_PROXY()
-{
-#if KLDEBUG
-   Pmsg1(50, "\t\t>>>> %4d AS_BSOCK_PROXY::AS_BSOCK_PROXY()\n", my_thread_id());
-#endif
-
-}
-
-void AS_BSOCK_PROXY::init()
+void AS_BSOCK_PROXY::init(AS_ENGINE *as_engine)
 {
    memset(this, 0, sizeof(AS_BSOCK_PROXY));
-   msg = get_pool_memory(PM_AS_BSOCK_PROXY);
 
-   msg = realloc_pool_memory(msg, (int32_t)as_get_initial_bsock_proxy_buf_size());
+   ase = as_engine;
+
+   msg = get_pool_memory(PM_AS_BSOCK_PROXY);
+   msg = realloc_pool_memory(msg, (int32_t)ase->as_get_initial_bsock_proxy_buf_size());
 
 #if KLDEBUG
    Pmsg2(50, "\t\t>>>> %4d %4X AS_BSOCK_PROXY::init()\n", my_thread_id(), HH(this));
@@ -47,7 +41,7 @@ bool AS_BSOCK_PROXY::send()
    /* New file to be sent */
    if (as_buf == NULL)
    {
-      as_buf = as_acquire_buffer(NULL, file_idx);
+      as_buf = ase->as_acquire_buffer(NULL, file_idx);
       as_buf->file_idx = file_idx;
 
 #if KLDEBUG
@@ -70,7 +64,7 @@ bool AS_BSOCK_PROXY::send()
    {
       /* Make sure the current buffer is marked for big file */
       as_buf->parent = this;
-      as_consumer_enqueue_buffer(as_buf, false);
+      ase->as_consumer_enqueue_buffer(as_buf, false);
 
 #if KLDEBUG
       Pmsg7(50, "\t\t>>>> %4d %4X AS_BSOCK_PROXY::send() WONT FIT GET NEW buf: %d bufsize: %4d parent: %4X msglen: %4d msg: %4d\n",
@@ -85,7 +79,7 @@ bool AS_BSOCK_PROXY::send()
 
 
       /* Get a new one which is already marked */ // TODO <<< na pewno?
-      as_buf = as_acquire_buffer(this, file_idx);
+      as_buf = ase->as_acquire_buffer(this, file_idx);
       as_buf->file_idx = file_idx;
 
       ASSERT(as_buf != NULL);
@@ -153,9 +147,9 @@ bool AS_BSOCK_PROXY::send()
 
 	  ASSERT(as_buf->size <= AS_BUFFER_CAPACITY);
 
-      as_consumer_enqueue_buffer(as_buf, false);
+	  ase->as_consumer_enqueue_buffer(as_buf, false);
       /* Get a new one which is already marked */
-      as_buf = as_acquire_buffer(this, file_idx);
+      as_buf = ase->as_acquire_buffer(this, file_idx);
       as_buf->file_idx = file_idx;
 
 #if KLDEBUG
@@ -250,7 +244,7 @@ void AS_BSOCK_PROXY::finalize()
 #endif
 
 
-      as_consumer_enqueue_buffer(as_buf, true);
+      ase->as_consumer_enqueue_buffer(as_buf, true);
       as_buf = NULL;
    }
    else
@@ -274,23 +268,15 @@ void AS_BSOCK_PROXY::cleanup()
    Pmsg4(50, "\t\t>>>> %4d %4X AS_BSOCK_PROXY::cleanup() msglen: %4d, msg: %4d\n", my_thread_id(), HH(this), msglen, H(msg));
 #endif
 
-
    // TODO VERY IMPORTANT
    finalize();
 
    if (msg)
    {
       free_pool_memory(msg);
-      msg = NULL;
    }
-   else
-   {
-#if KLDEBUG
-      Pmsg2(50, "\t\t>>>> %4d %4X AS_BSOCK_PROXY::cleanup() AGAIN!!!\n", my_thread_id(), HH(this));
-#endif
 
-
-   }
+   memset(this, 0, sizeof(AS_BSOCK_PROXY));
 }
 
 void AS_BSOCK_PROXY::destroy()

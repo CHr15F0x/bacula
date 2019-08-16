@@ -25,7 +25,9 @@
 #include "filed.h"
 #include "ch.h"
 
+#if AS_BACKUP
 #include "as_bsock_proxy.h"
+#endif
 
 #ifdef HAVE_DARWIN_OS
 const bool have_darwin_os = true;
@@ -233,12 +235,14 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
 
    sd->set_locking(); // TODO potrzebne???
 
+   AS_ENGINE ase;
+   ase.init();
 
-
+   jcr->ase = &ase;
 
    // Takes ownership of sd socket
    // To samo dla naszych socketów !!!
-   as_init(sd, as_bsock_proxy_initial_buf_len);
+   ase.as_init(sd, as_bsock_proxy_initial_buf_len);
 
 
 
@@ -254,7 +258,10 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
 
 
    // Releases ownership of sd socket
-   as_shutdown(sd);
+   ase.as_shutdown(sd);
+   ase.cleanup();
+
+   jcr->ase = NULL;
 
    // sm_check(__FILE__, __LINE__, true);
 
@@ -686,7 +693,7 @@ int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level)
    // AS TODO what to do with the return value?
    return
 #if AS_BACKUP
-   as_save_file_schedule
+   jcr->ase->as_save_file_schedule
 #else
    as_save_file
 #endif
@@ -746,7 +753,7 @@ int as_save_file(
 
 #if AS_BACKUP
    AS_BSOCK_PROXY proxy;
-   proxy.init();
+   proxy.init(jcr->ase);
    AS_BSOCK_PROXY *sd = &proxy;
 #else
    BSOCK *sd = jcr->store_bsock;

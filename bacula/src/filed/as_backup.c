@@ -18,36 +18,45 @@ int my_thread_id()
    return H(pthread_self());
 }
 
-/* Producer stuff */
-static workq_t as_work_queue = { 0 };
-static POOLMEM *as_save_msg_pointer = NULL;
-static uint32_t as_initial_buf_size = 0;
-static pthread_mutex_t as_buffer_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t as_buffer_cond = PTHREAD_COND_INITIALIZER;
-static BQUEUE as_free_buffer_queue =
+void AS_ENGINE::init()
 {
-   &as_free_buffer_queue,
-   &as_free_buffer_queue
-};
-/* Consumer stuff */
-static pthread_mutex_t as_consumer_queue_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_mutex_t as_consumer_thread_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_t as_consumer_thread = 0;
-static bool as_consumer_thread_quit = false;
-static pthread_cond_t as_consumer_queue_cond = PTHREAD_COND_INITIALIZER;
-static BQUEUE as_consumer_buffer_queue =
-{
-   &as_consumer_buffer_queue,
-   &as_consumer_buffer_queue
-};
-static AS_BSOCK_PROXY *as_bigfile_bsock_proxy = NULL;
-static as_buffer_t *as_bigfile_buffer_only = NULL;
-static as_buffer_t *as_fix_fi_order_buffer = NULL;
-static int as_last_file_idx = 0;
-static bool as_consumer_thread_started = false;
-static pthread_cond_t as_consumer_thread_started_cond = PTHREAD_COND_INITIALIZER;
+   memset(this, 0, sizeof(AS_ENGINE));
 
-int as_smallest_fi_in_consumer_queue()
+   /* Producer stuff */
+   pthread_mutex_init(&as_buffer_lock, NULL);
+   pthread_cond_init(&as_buffer_cond, NULL);
+   as_free_buffer_queue.qnext = &as_free_buffer_queue;
+   as_free_buffer_queue.qprev = &as_free_buffer_queue;
+   /* Consumer stuff */
+   pthread_mutex_init(&as_consumer_thread_lock, NULL);
+   pthread_cond_init(&as_consumer_thread_started_cond, NULL);
+   pthread_mutex_init(&as_consumer_queue_lock, NULL);
+   pthread_cond_init(&as_consumer_queue_cond, NULL);
+   as_consumer_buffer_queue.qnext = &as_consumer_buffer_queue;
+   as_consumer_buffer_queue.qprev = &as_consumer_buffer_queue;
+}
+
+void AS_ENGINE::cleanup()
+{
+   /* Producer stuff */
+   pthread_mutex_destroy(&as_buffer_lock);
+   pthread_cond_destroy(&as_buffer_cond);
+   /* Consumer stuff */
+   pthread_mutex_destroy(&as_consumer_thread_lock);
+   pthread_cond_destroy(&as_consumer_thread_started_cond);
+   pthread_mutex_destroy(&as_consumer_queue_lock);
+   pthread_cond_destroy(&as_consumer_queue_cond);
+
+   memset(this, 0, sizeof(AS_ENGINE));
+}
+
+void AS_ENGINE::destroy()
+{
+   cleanup();
+   free(this);
+}
+
+int AS_ENGINE::as_smallest_fi_in_consumer_queue()
 {
    int smallest_fi = INT_MAX;
 
@@ -66,11 +75,7 @@ int as_smallest_fi_in_consumer_queue()
    return smallest_fi;
 }
 
-//
-// Producer loop
-//
-
-as_buffer_t *as_acquire_buffer(AS_BSOCK_PROXY *parent, int file_idx)
+as_buffer_t *AS_ENGINE::as_acquire_buffer(AS_BSOCK_PROXY *parent, int file_idx)
 {
 #if KLDEBUG
    Pmsg2(50, "\t\t>>>> %4d as_acquire_buffer() BEGIN parent: %4X\n",
@@ -145,7 +150,7 @@ as_buffer_t *as_acquire_buffer(AS_BSOCK_PROXY *parent, int file_idx)
    return buffer;
 }
 
-void dump_consumer_queue()
+void AS_ENGINE::dump_consumer_queue()
 {
 #if KLDEBUG_CONS_QUEUE
 
@@ -166,14 +171,14 @@ void dump_consumer_queue()
 }
 
 
-void dump_consumer_queue_locked()
+void AS_ENGINE::dump_consumer_queue_locked()
 {
    P(as_consumer_queue_lock);
    dump_consumer_queue();
    V(as_consumer_queue_lock);
 }
 
-void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
+void AS_ENGINE::as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
 {
 	P(as_consumer_queue_lock);
 
@@ -214,7 +219,7 @@ void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
 	pthread_cond_signal(&as_consumer_queue_cond);
 }
 
-int as_workqueue_engine_quit()
+int AS_ENGINE::as_workqueue_engine_quit()
 {
    int quit = 0;
 
@@ -290,7 +295,6 @@ struct FF_PKT {
 #endif
 
 
-#if 1
 #define STRDUP(X)	if (orig_ff_pkt->X) ff_pkt->X = bstrdup(orig_ff_pkt->X)
 #define STRFREE(X)	if (ff_pkt->X) free(ff_pkt->X)
 #define POOLMEMDUP(X) if (orig_ff_pkt->X) \
@@ -371,70 +375,8 @@ void as_free_ff_pkt_clone(FF_PKT *ff_pkt)
 #undef STRFREE
 #undef POOLMEMDUP
 #undef POOLMEMFREE
-#else
 
-
-
-// TODO skopiowa� tylko te atrybuty kt�re s� u�ywane w as_save_file i wo�anych w
-// niej funkcjach
-FF_PKT *as_new_ff_pkt_clone(FF_PKT *orig_ff_pkt)
-{
-   FF_PKT *ff_pkt = (FF_PKT *)bmalloc(sizeof(FF_PKT));
-   memcpy(ff_pkt, orig_ff_pkt, sizeof(FF_PKT));
-   ff_pkt->fname = bstrdup(orig_ff_pkt->fname);
-   ff_pkt->link = bstrdup(orig_ff_pkt->link);
-   ff_pkt->sys_fname = get_pool_memory(PM_FNAME);
-   ff_pkt->included_files_list = NULL;
-   ff_pkt->excluded_files_list = NULL;
-   ff_pkt->excluded_paths_list = NULL;
-   ff_pkt->linkhash = NULL;
-   ff_pkt->fname_save = NULL;
-   ff_pkt->link_save = NULL;
-   ff_pkt->ignoredir_fname = NULL;
-   return ff_pkt;
-}
-
-void as_free_ff_pkt_clone(FF_PKT *ff_pkt)
-{
-   free(ff_pkt->fname);
-   free(ff_pkt->link);
-   free_pool_memory(ff_pkt->sys_fname);
-   if (ff_pkt->fname_save) {
-      free_pool_memory(ff_pkt->fname_save);
-   }
-   if (ff_pkt->link_save) {
-      free_pool_memory(ff_pkt->link_save);
-   }
-   if (ff_pkt->ignoredir_fname) {
-      free_pool_memory(ff_pkt->ignoredir_fname);
-   }
-   free(ff_pkt);
-}
-
-
-#endif
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-int as_save_file_schedule(
+int AS_ENGINE::as_save_file_schedule(
    JCR *jcr,
    FF_PKT *ff_pkt,
    bool do_plugin_set,
@@ -446,7 +388,6 @@ int as_save_file_schedule(
 #if KLDEBUG
    Pmsg2(50, "\t\t>>>> %4d as_save_file_schedule() file: %s\n", my_thread_id(), ff_pkt->fname);
 #endif
-
 
    as_save_file_context_t *context = (as_save_file_context_t *)malloc(sizeof(as_save_file_context_t));
    context->jcr = jcr;
@@ -484,22 +425,18 @@ void *as_workqueue_engine(void *arg)
    return NULL;
 }
 
-//
-// Consumer loop
-//
-
-void as_wait_for_consumer_thread_started()
+void AS_ENGINE::as_wait_for_consumer_thread_started()
 {
-	P(as_consumer_thread_lock);
-	while (as_consumer_thread_started == false)
-	{
-	   pthread_cond_wait(&as_consumer_thread_started_cond, &as_consumer_thread_lock);
-	}
-	V(as_consumer_thread_lock);
+   P(as_consumer_thread_lock);
+   while (as_consumer_thread_started == false)
+   {
+      pthread_cond_wait(&as_consumer_thread_started_cond, &as_consumer_thread_lock);
+   }
+   V(as_consumer_thread_lock);
 }
 
 
-bool as_quit_consumer_thread_loop()
+bool AS_ENGINE::as_quit_consumer_thread_loop()
 {
    bool quit = false;
 
@@ -510,20 +447,24 @@ bool as_quit_consumer_thread_loop()
    return quit;
 }
 
-bool as_is_consumer_queue_empty(bool lockme)
+bool AS_ENGINE::as_is_consumer_queue_empty(bool lockme)
 {
-	bool empty = false;
+   bool empty = false;
 
-    if (lockme) P(as_consumer_queue_lock);
+   if (lockme) {
+      P(as_consumer_queue_lock);
+   }
 
-    empty = (qsize(&as_consumer_buffer_queue) == 0);
+   empty = (qsize(&as_consumer_buffer_queue) == 0);
 
-    if (lockme) V(as_consumer_queue_lock);
+   if (lockme) {
+      V(as_consumer_queue_lock);
+   }
 
-    return empty;
+   return empty;
 }
 
-void as_release_buffer(as_buffer_t *buffer)
+void AS_ENGINE::as_release_buffer(as_buffer_t *buffer)
 {
 #if KLDEBUG
    Pmsg4(50, "\t\t>>>> %4d as_release_buffer() BEGIN %d (%p), free size: %d \n",
@@ -561,15 +502,19 @@ void as_release_buffer(as_buffer_t *buffer)
 
 }
 
-//
-//
-// TODO AS_BSOCK_PROXY - use as_buffers directly! (da sie tak?)
-//
-//
-void *as_consumer_thread_loop(void *arg)
+static void *as_consumer_thread_loop_wrapper(void *arg)
 {
-   BSOCK *sd = (BSOCK *)arg;
+   as_cons_thread_loop_context_t *ctxt = (as_cons_thread_loop_context_t *)arg;
 
+   ctxt->as_engine->as_consumer_thread_loop(ctxt->sd);
+
+   free(ctxt);
+
+   return NULL;
+}
+
+void AS_ENGINE::as_consumer_thread_loop(BSOCK *sd)
+{
    // Socket is ours now (todo check for sure)
    sd->clear_locking(); // TODO potrzebne?
 
@@ -746,7 +691,7 @@ void *as_consumer_thread_loop(void *arg)
       if (buffer == NULL)
       {
          // To znaczy ze wychodzimy z watku
-         return NULL;
+         return;
       }
       else
       {
@@ -864,20 +809,14 @@ void *as_consumer_thread_loop(void *arg)
    as_consumer_thread_started = false;
    V(as_consumer_thread_lock);
 
-
-
    sd->set_locking(); // TODO potrzebne?
 
-
-   return NULL;
+   return;
 }
 
 #undef NEED_TO_INIT
 
-//
-// Initialization
-//
-void as_init_free_buffers_queue()
+void AS_ENGINE::as_init_free_buffers_queue()
 {
    as_buffer_t *buffer = NULL;
    char *start = NULL;
@@ -910,13 +849,17 @@ void as_init_free_buffers_queue()
    ASSERT(as_fix_fi_order_buffer != NULL);
 }
 
-void as_init_consumer_thread(BSOCK *sd)
+void AS_ENGINE::as_init_consumer_thread(BSOCK *sd)
 {
    P(as_consumer_thread_lock);
    as_consumer_thread_quit = false;
    V(as_consumer_thread_lock);
 
-	pthread_create(&as_consumer_thread, NULL, as_consumer_thread_loop, (void *)sd);
+   as_cons_thread_loop_context_t *ctxt = (as_cons_thread_loop_context_t *)malloc(sizeof(as_cons_thread_loop_context_t));
+   ctxt->as_engine = this;
+   ctxt->sd = sd;
+
+	pthread_create(&as_consumer_thread, NULL, as_consumer_thread_loop_wrapper, (void *)ctxt);
 
 #if KLDEBUG
    Pmsg3(50, "\t\t>>>> %4d as_init_consumer_thread() id: %4d sock: %p\n",
@@ -925,7 +868,7 @@ void as_init_consumer_thread(BSOCK *sd)
 
 }
 
-void as_workqueue_init()
+void AS_ENGINE::as_workqueue_init()
 {
 #if KLDEBUG
    Pmsg1(50, "\t\t>>>> %4d as_workqueue_init()\n", my_thread_id());
@@ -935,7 +878,7 @@ void as_workqueue_init()
 }
 
 
-void as_init(BSOCK *sd, uint32_t buf_size)
+void AS_ENGINE::as_init(BSOCK *sd, uint32_t buf_size)
 {
 #if KLDEBUG_INIT_SHUT
    Pmsg2(50, "\t\t>>>> %4d as_init() sock: %p\n", my_thread_id(), sd);
@@ -952,16 +895,12 @@ void as_init(BSOCK *sd, uint32_t buf_size)
 	as_workqueue_init();
 }
 
-uint32_t as_get_initial_bsock_proxy_buf_size()
+uint32_t AS_ENGINE::as_get_initial_bsock_proxy_buf_size()
 {
    return as_initial_buf_size;
 }
 
-//
-// Shutdown
-//
-
-void as_request_consumer_thread_quit()
+void AS_ENGINE::as_request_consumer_thread_quit()
 {
 #if KLDEBUG
    Pmsg1(50, "\t\t>>>> %4d as_request_consumer_thread_quit()\n", my_thread_id());
@@ -973,26 +912,23 @@ void as_request_consumer_thread_quit()
    V(as_consumer_thread_lock);
 }
 
-void as_join_consumer_thread()
+void AS_ENGINE::as_join_consumer_thread()
 {
    pthread_cond_signal(&as_consumer_queue_cond);
-
 
 #if KLDEBUG
    Pmsg1(50, "\t\t>>>> %4d as_join_consumer_thread()\n", my_thread_id());
 #endif
 
-
 	pthread_join(as_consumer_thread, NULL);
 }
 
-void as_dealloc_all_buffers()
+void AS_ENGINE::as_dealloc_all_buffers()
 {
 #if KLDEBUG_DEALLOC_BUFFERS
    Pmsg3(50, "\t\t>>>> %4d as_dealloc_all_buffers() BEGIN, free size %4d consumer size %4d\n",
       my_thread_id(), qsize(&as_free_buffer_queue), qsize(&as_consumer_buffer_queue));
 #endif
-
 
    as_buffer_t *buffer = NULL;
 
@@ -1063,7 +999,7 @@ void as_dealloc_all_buffers()
    ASSERT(0 == qsize(&as_consumer_buffer_queue));
 }
 
-void as_workqueue_destroy()
+void AS_ENGINE::as_workqueue_destroy()
 {
 #if KLDEBUG
    Pmsg1(50, "\t\t>>>> %4d as_workqueue_destroy()\n", my_thread_id());
@@ -1072,7 +1008,7 @@ void as_workqueue_destroy()
    workq_destroy(&as_work_queue);
 }
 
-void as_shutdown(BSOCK *sd)
+void AS_ENGINE::as_shutdown(BSOCK *sd)
 {
 #if KLDEBUG_INIT_SHUT
    Pmsg1(50, "\t\t>>>> %4d as_shutdown() BEGIN\n", my_thread_id());

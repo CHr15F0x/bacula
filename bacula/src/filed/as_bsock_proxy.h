@@ -14,14 +14,13 @@ public:
 
 private:
 
+   AS_ENGINE *ase;
    as_buffer_t *as_buf;
    int file_idx;
 
 public:
 
-   AS_BSOCK_PROXY();
-
-   void init();
+   void init(AS_ENGINE *as_engine);
    bool send();
    bool fsend(const char *fmt, ...);
    bool signal(int signal);
