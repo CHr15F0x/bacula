@@ -1,25 +1,14 @@
 #include "bacula.h"
 #include "jcr.h"
 #include "as_backup.h"
-
-
-
-
 #include "../findlib/find.h"
-
-
 #include "as_bsock_proxy.h"
-
-
 
 #define KLDEBUG 0
 #define KLDEBUG_LOOP 0
 #define KLDEBUG_CONS_ENQUEUE 0
 #define KLDEBUG_DEALLOC_BUFFERS 0
-
 #define KLDEBUG_CONS_QUEUE 0
-
-
 #define KLDEBUG_FI 0
 #define KLDEBUG_LOOP_DEQUEUE 0
 #define KLDEBUG_INIT_SHUT 0
@@ -29,65 +18,38 @@ int my_thread_id()
    return H(pthread_self());
 }
 
-
-
-//
-// AS TODO
-// condition variables for buffers which are ready to be used
-// or buffers which can be consumed by the consumer thread
-//
-
-//
-// Producer related data structures
-//
-
-// TODO is one instance enough? Can bacula jobs be scheduled concurently?
 static workq_t as_work_queue = { 0 };
-
-// AS TODO tutaj dodać muteksy do danych które mogą być dzielone między workerami
-// 1. dla JCR
-// ... ?
-
-
-//
-// Consumer related data structures
-//
-// AS TODO ten muteks jest tylko do wychodzenia z pętli wątku
 static pthread_mutex_t as_consumer_queue_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t as_consumer_thread_lock = PTHREAD_MUTEX_INITIALIZER;
-
 static pthread_t as_consumer_thread = 0;
-
 static bool as_consumer_thread_quit = false;
 static pthread_cond_t as_consumer_queue_cond = PTHREAD_COND_INITIALIZER;
-
 static BQUEUE as_consumer_buffer_queue =
 {
    &as_consumer_buffer_queue,
    &as_consumer_buffer_queue
 };
-
 static AS_BSOCK_PROXY *as_bigfile_bsock_proxy = NULL;
 static as_buffer_t *as_bigfile_buffer_only = NULL;
 static as_buffer_t *as_fix_fi_order_buffer = NULL;
-// Make sure that we're sending files in ascending order
-int as_last_file_idx = 0;
-
-
-//
-// Data structures shared between producer threads and consumer thread
-//
-
-// AS TODO use condition variable
-// AS TODO dwa muteksy - jeden dla buforów wolnych, drugi dla kolejki dla konsumenta
+static int as_last_file_idx = 0;
 static pthread_mutex_t as_buffer_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t as_buffer_cond = PTHREAD_COND_INITIALIZER;
-
 static BQUEUE as_free_buffer_queue =
 {
    &as_free_buffer_queue,
    &as_free_buffer_queue
 };
+static bool as_consumer_thread_started = false;
+static pthread_cond_t as_consumer_thread_started_cond = PTHREAD_COND_INITIALIZER;
+static POOLMEM *as_save_msg_pointer = NULL;
+static uint32_t as_initial_buf_size = 0;
+
+
+
+
+
+
 
 int as_smallest_fi_in_consumer_queue()
 {
@@ -529,9 +491,6 @@ void *as_workqueue_engine(void *arg)
 //
 // Consumer loop
 //
-
-bool as_consumer_thread_started = false;
-pthread_cond_t as_consumer_thread_started_cond = PTHREAD_COND_INITIALIZER;
 
 void as_wait_for_consumer_thread_started()
 {
@@ -986,9 +945,6 @@ void as_workqueue_init()
    workq_init(&as_work_queue, AS_PRODUCER_THREADS, as_workqueue_engine);
 }
 
-
-static POOLMEM *as_save_msg_pointer = NULL;
-static uint32_t as_initial_buf_size = 0;
 
 void as_init(BSOCK *sd, uint32_t buf_size)
 {
