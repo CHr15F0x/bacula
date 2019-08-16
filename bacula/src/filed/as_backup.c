@@ -17,9 +17,12 @@
 #define KLDEBUG_CONS_ENQUEUE 0
 #define KLDEBUG_DEALLOC_BUFFERS 0
 
+#define KLDEBUG_CONS_QUEUE 1
+
+
 #define KLDEBUG_FI 1
 #define KLDEBUG_LOOP_DEQUEUE 1
-#define KLDEBUG_INIT_SHUT 1
+#define KLDEBUG_INIT_SHUT 0
 
 int my_thread_id()
 {
@@ -155,7 +158,7 @@ as_buffer_t *as_acquire_buffer(AS_BSOCK_PROXY *parent)
 
 void dump_consumer_queue()
 {
-#if KLDEBUG_CONS_ENQUEUE
+#if KLDEBUG_CONS_QUEUE
 
    as_buffer_t *buffer = (as_buffer_t *)qnext(&as_consumer_buffer_queue, NULL);
 
@@ -163,13 +166,22 @@ void dump_consumer_queue()
 
    while (buffer)
    {
-      Pmsg6(50, "\t\t>>>> %4d CONSUMER_Q[%d] %d (%p) parent: %4X, curr_bigfile: %4X\n",
-         my_thread_id(), cnt, buffer->id, buffer, buffer ? HH(buffer->parent) : 0, HH(as_bigfile_bsock_proxy));
+      Pmsg7(50, "\t\t>>>> %4d CONSUMER_Q[%d] %d (%p) FI: %4d parent: %4X, curr_bigfile: %4X\n",
+         my_thread_id(), cnt, buffer->id, buffer, buffer->file_idx,
+         buffer ? HH(buffer->parent) : 0, HH(as_bigfile_bsock_proxy));
 
       buffer = (as_buffer_t *)qnext(&as_consumer_buffer_queue, &buffer->bq);
       ++cnt;
    }
 #endif
+}
+
+
+void dump_consumer_queue_locked()
+{
+   P(as_consumer_queue_lock);
+   dump_consumer_queue();
+   V(as_consumer_queue_lock);
 }
 
 void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
@@ -188,9 +200,13 @@ void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
       // This was the last buffer for this big file
       buffer->final = 1;
    }
+   else
+   {
+      buffer->final = 0;
+   }
 
 #if KLDEBUG_FI
-    Pmsg7(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d, FI: %d parent: %4X bigfile: %4X, final: %d cons.q.size: %d\n",
+    Pmsg7(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d, FI: %4d parent: %4X bigfile: %4X, final: %d cons.q.size: %d\n",
        my_thread_id(), buffer->id, buffer->file_idx, HH(buffer->parent), HH(as_bigfile_bsock_proxy),
 	   buffer->final, qsize(&as_consumer_buffer_queue));
 #endif

@@ -87,7 +87,7 @@ static void close_vss_backup_session(JCR *jcr);
 
 #define KLDEBUG_FI 1
 
-
+#define KLDEBUG_AS_SAVE_FILE 1
 
 
 /**
@@ -403,6 +403,9 @@ static void crypto_session_end(JCR *jcr)
       jcr->crypto.pki_session_encoded = NULL;
    }
 }
+
+
+extern void dump_consumer_queue_locked();
 
 #if AS_BACKUP
 static bool crypto_session_send(JCR *jcr, AS_BSOCK_PROXY *sd)
@@ -735,8 +738,9 @@ int as_save_file(
    int jcr_jobfiles = 0;
 
 
-#if KLDEBUG
+#if KLDEBUG_AS_SAVE_FILE
    Pmsg2(50, "\t\t\t>>>> %4d as_save_file() BEGIN file: %s\n", my_thread_id(), ff_pkt->fname);
+   dump_consumer_queue_locked();
 #endif
 
 
@@ -1176,8 +1180,9 @@ bail_out:
       crypto_sign_free(sig);
    }
 
-#if KLDEBUG
+#if KLDEBUG_AS_SAVE_FILE
    Pmsg2(50, "\t\t\t>>>> %4d as_save_file() END   file: %s\n", my_thread_id(), ff_pkt->fname);
+   dump_consumer_queue_locked();
 #endif
 
    // AS TODO zasygnalizować koniec przesyłania całego pliku do AS_BSOCK_PROXY
