@@ -690,15 +690,15 @@ int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level)
       }
    }
 
+   // AS TODO what to do with the return value?
+   return
 #if AS_BACKUP
-   return jcr->ase->as_save_file_schedule(
-      jcr, ff_pkt, do_plugin_set, digest, signing_digest,
-      digest_stream, has_file_data);
+   jcr->ase->as_save_file_schedule
 #else
-   return as_save_file(
-      jcr->ase, jcr, ff_pkt, do_plugin_set, digest, signing_digest,
-      digest_stream, has_file_data);
+   as_save_file
 #endif
+    (jcr, ff_pkt, do_plugin_set, digest, signing_digest,
+      digest_stream, has_file_data);
 
 early_good_rtn:
    rtnstat = 1;
@@ -729,7 +729,6 @@ early_good_rtn:
 
 // AS TODO
 int as_save_file(
-   AS_ENGINE *ase,
    JCR *jcr,
    FF_PKT *ff_pkt,
    bool do_plugin_set,
@@ -754,7 +753,7 @@ int as_save_file(
 
 #if AS_BACKUP
    AS_BSOCK_PROXY proxy;
-   proxy.init(ase);
+   proxy.init(jcr->ase);
    AS_BSOCK_PROXY *sd = &proxy;
 #else
    BSOCK *sd = jcr->store_bsock;
