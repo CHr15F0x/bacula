@@ -1,7 +1,8 @@
+#define AS_BACKUP 1
+
 #include "bacula.h"
-#include "jcr.h"
+#include "filed.h"
 #include "as_backup.h"
-#include "../findlib/find.h"
 #include "as_bsock_proxy.h"
 
 #define KLDEBUG 0
@@ -390,6 +391,9 @@ int AS_ENGINE::as_save_file_schedule(
 #endif
 
    as_save_file_context_t *context = (as_save_file_context_t *)malloc(sizeof(as_save_file_context_t));
+   /* We need to make a copy of ase addr */
+   context->ase = jcr->ase;
+   jcr->ase = NULL;
    context->jcr = jcr;
    context->ff_pkt = as_new_ff_pkt_clone(ff_pkt);
    context->do_plugin_set = do_plugin_set;
@@ -412,6 +416,7 @@ void *as_workqueue_engine(void *arg)
 #endif
 
    as_save_file(
+      context->ase,
       context->jcr,
       context->ff_pkt,
       context->do_plugin_set,

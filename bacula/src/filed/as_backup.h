@@ -4,7 +4,7 @@
 class AS_BSOCK_PROXY;
 typedef struct Digest DIGEST;
 struct FF_PKT;
-struct JCR;
+class JCR;
 
 #define H(x) (int)((unsigned char)( \
       ((unsigned long)x >> 0) ^ ((unsigned long)x >> 1) ^ \
@@ -78,6 +78,11 @@ private:
    AS_BSOCK_PROXY *as_bigfile_bsock_proxy;
    as_buffer_t *as_fix_fi_order_buffer;
    int as_last_file_idx;
+   /* Compressio stuff */
+   POOLMEM *compress_buf;             /* Compression buffer */
+   int32_t compress_buf_size;         /* Length of compression buffer */
+   void *pZLIB_compress_workset;      /* zlib compression session data */
+   void *LZO_compress_workset;        /* lzo compression session data */
 
 public:
 
@@ -137,6 +142,7 @@ public:
 
 typedef struct
 {
+   AS_ENGINE *ase;
    JCR *jcr;
    FF_PKT *ff_pkt; // TODO will need a copy?
    bool do_plugin_set;
@@ -150,6 +156,7 @@ FF_PKT *as_new_ff_pkt_clone(FF_PKT *ff_pkt);
 void as_free_ff_pkt_clone(FF_PKT *ff_pkt);
 
 int as_save_file(
+   AS_ENGINE *ase,
    JCR *jcr,
    FF_PKT *ff_pkt,
    bool do_plugin_set,
