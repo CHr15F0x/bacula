@@ -27,7 +27,7 @@
 
 #if AS_BACKUP
 #include "as_bsock_proxy.h"
-#endif
+#endif /* AS_BACKUP */
 
 #ifdef HAVE_DARWIN_OS
 const bool have_darwin_os = true;
@@ -53,22 +53,22 @@ int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level);
 static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest, DIGEST *signature_digest
 #if AS_BACKUP
    , AS_BSOCK_PROXY *sd, int jcr_jobfiles
-#endif
+#endif /* AS_BACKUP */
 );
 
 bool encode_and_send_attributes(JCR *jcr, FF_PKT *ff_pkt, int &data_stream);
 #if AS_BACKUP
 static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &data_stream, AS_BSOCK_PROXY *sd, int *);
-#endif
+#endif /* AS_BACKUP */
 
 static bool crypto_session_start(JCR *jcr);
 static void crypto_session_end(JCR *jcr);
 
 #if AS_BACKUP
 static bool crypto_session_send(JCR *jcr, AS_BSOCK_PROXY *sd);
-#else
+#else /* AS_BACKUP */
 static bool crypto_session_send(JCR *jcr, BSOCK *sd);
-#endif
+#endif /* !AS_BACKUP */
 
 static void close_vss_backup_session(JCR *jcr);
 
@@ -647,7 +647,6 @@ int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level)
       }
    }
 
-   // AS TODO what to do with the return value?
    return
 #if AS_BACKUP
    jcr->ase->as_save_file_schedule
@@ -665,11 +664,6 @@ early_good_rtn:
       rtnstat = 0;
    }
    if (ff_pkt->opt_plugin) {
-      // AS TODO czy to jest bezpieczne?
-      // Pewnie przydałby się muteks albo co gorsza
-      // a może raczej trzeba sprawdzić czy ktoś jeszcze używa i dopiero
-      // zerować jak wszyscy skończą
-      // Albo któreś z tych danych powinny być per wątek
       jcr->plugin_sp = NULL;    /* sp is local to this function */
       jcr->plugin_ctx = NULL;
       jcr->plugin = NULL;
