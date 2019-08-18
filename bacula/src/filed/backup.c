@@ -57,7 +57,9 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest, DIGES
 );
 
 bool encode_and_send_attributes(JCR *jcr, FF_PKT *ff_pkt, int &data_stream);
+#if AS_BACKUP
 static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &data_stream, AS_BSOCK_PROXY *sd, int *);
+#endif
 
 static bool crypto_session_start(JCR *jcr);
 static void crypto_session_end(JCR *jcr);
@@ -70,16 +72,9 @@ static bool crypto_session_send(JCR *jcr, BSOCK *sd);
 
 static void close_vss_backup_session(JCR *jcr);
 
-
-
-
-
 #define KLDEBUG 0
-
 #define KLDEBUG_FI 0
-
 #define KLDEBUG_AS_SAVE_FILE 0
-
 
 /**
  * Find all the requested files and send them
@@ -127,9 +122,9 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
 
    jcr->buf_size = sd->msglen;
 
-   // TODO we can consume so much more up AS_BUFFER_CAPACITY
-   // uint32_t as_bsock_proxy_initial_buf_len = sd->msglen;
-   uint32_t as_bsock_proxy_initial_buf_len = AS_BUFFER_CAPACITY;
+#if AS_BACKUP
+   uint32_t as_bsock_proxy_initial_buf_len = AS_BUFFER_CAPACITY; /* or sd->msglen */
+#endif /* AS_BACKUP */
 
    /**
     * Adjust for compression so that output buffer is
@@ -211,32 +206,22 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
       jcr->xattr_data->u.build->content = get_pool_memory(PM_MESSAGE);
    }
 
-
 #if KLDEBUG
    Pmsg4(50, "\t\t\t>>>> %4d BEFORE as_init() sock: %p msg: %p msglen: %d\n",
       my_thread_id(), sd, sd->msg, sd->msglen);
 #endif
 
-
-   // job thread may still be send()ing data while as_init() may trigger yet another send
-   // Czy to jest potrzebne???
-   // sm_check(__FILE__, __LINE__, true);
-
-   sd->set_locking(); // TODO potrzebne???
+#if AS_BACKUP
+   sd->set_locking();
 
    AS_ENGINE ase;
    ase.init();
 
    jcr->ase = &ase;
 
-   // Takes ownership of sd socket
-   // To samo dla naszych socketów !!!
+   /* Takes ownership of sd socket */
    ase.as_init(sd, as_bsock_proxy_initial_buf_len);
-
-
-
-
-
+#endif /* AS_BACKUP */
 
    /** Subroutine save_file() is called for each file */
    if (!find_files(jcr, (FF_PKT *)jcr->ff, save_file, plugin_save)) {
@@ -244,26 +229,20 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
       jcr->setJobStatus(JS_ErrorTerminated);
    }
 
-
-
-   // Releases ownership of sd socket
+#if AS_BACKUP
+   /* Releases ownership of sd socket */
    ase.as_shutdown(sd);
    ase.cleanup();
 
    jcr->ase = NULL;
 
-   // sm_check(__FILE__, __LINE__, true);
-
-   // Czy to jest potrzebne??
-   // Moved to the start of consumer thread
    sd->clear_locking();
-
+#endif /* AS_BACKUP */
 
 #if KLDEBUG
    Pmsg4(50, "\t\t\t>>>> %4d AFTER as_shutdown() sock: %p msg: %p msglen: %d\n",
       my_thread_id(), sd, sd->msg, sd->msglen);
 #endif
-
 
    if (have_acl && jcr->acl_data->u.build->nr_errors > 0) {
       Jmsg(jcr, M_WARNING, 0, _("Encountered %ld acl errors while doing backup\n"),
@@ -280,21 +259,17 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
 
    stop_heartbeat_monitor(jcr);
 
-
 #if KLDEBUG
    Pmsg4(50, "\t\t\t>>>> %4d BEFORE last signal, sock: %p msg: %p msglen: %d\n",
       my_thread_id(), sd, sd->msg, sd->msglen);
 #endif
 
-
    sd->signal(BNET_EOD);            /* end of sending data */
-
 
 #if KLDEBUG
    Pmsg4(50, "\t\t\t>>>> %4d AFTER last signal, sock: %p msg: %p msglen: %d\n",
       my_thread_id(), sd, sd->msg, sd->msglen);
 #endif
-
 
    if (have_acl && jcr->acl_data) {
       free_pool_memory(jcr->acl_data->u.build->content);
@@ -335,7 +310,6 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
    Pmsg5(50, "\t\t\t>>>> %4d end blast_data ok=%d ,sock: %p msg: %p msglen: %d\n",
       my_thread_id(), ok, sd, sd->msg, sd->msglen);
 #endif
-
 
    Dmsg1(100, "end blast_data ok=%d\n", ok);
 
@@ -400,14 +374,11 @@ static void crypto_session_end(JCR *jcr)
    }
 }
 
-
-extern void dump_consumer_queue_locked();
-
 #if AS_BACKUP
 static bool crypto_session_send(JCR *jcr, AS_BSOCK_PROXY *sd)
-#else
+#else /* AS_BACKUP */
 static bool crypto_session_send(JCR *jcr, BSOCK *sd)
-#endif
+#endif /* !AS_BACKUP */
 {
    POOLMEM *msgsave;
 
@@ -441,20 +412,18 @@ static bool crypto_session_send(JCR *jcr, BSOCK *sd)
  */
 int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level)
 {
-   bool do_plugin_set = false; // AS both, passed via ctxt
-   DIGEST *digest = NULL; // AS both, passed via ctxt
-   DIGEST *signing_digest = NULL; // AS both, passed via ctxt
-   int digest_stream = STREAM_NONE; // AS both, passed via ctxt
-   bool has_file_data = false; // AS both, passed via ctxt
-
+   bool do_plugin_set = false;
+   DIGEST *digest = NULL;
+   DIGEST *signing_digest = NULL;
+   int digest_stream = STREAM_NONE;
+   bool has_file_data = false;
 
 #if KLDEBUG
    Pmsg2(50, "\t\t\t>>>> %4d save_file() file: %s\n", my_thread_id(), ff_pkt->fname);
 #endif
 
-
-   int rtnstat = 0; // AS duplicate, local in both
-   struct save_pkt sp;          /* use by option plugin */   // AS save_file
+   int rtnstat = 0;
+   struct save_pkt sp;          /* use by option plugin */
 
    crypto_digest_t signing_algorithm = (crypto_digest_t) me->pki_digest;
 
@@ -715,7 +684,6 @@ early_good_rtn:
    return rtnstat;
 }
 
-// AS TODO
 int as_save_file(
    JCR *jcr,
    FF_PKT *ff_pkt,
@@ -725,61 +693,41 @@ int as_save_file(
    int digest_stream,
    bool has_file_data)
 {
-   bool do_read = false; // AS async local only
-   bool plugin_started = false; // AS async local only
-   int stat, data_stream; // AS async local only
-   SIGNATURE *sig = NULL; // AS async local only
-   int rtnstat = 0; // AS duplicate, local in both
+   bool do_read = false;
+   bool plugin_started = false;
+   int stat, data_stream;
+   SIGNATURE *sig = NULL;
+   int rtnstat = 0;
    int jcr_jobfiles = 0;
-
 
 #if KLDEBUG_AS_SAVE_FILE
    Pmsg2(50, "\t\t\t>>>> %4d as_save_file() BEGIN file: %s\n", my_thread_id(), ff_pkt->fname);
    dump_consumer_queue_locked();
 #endif
 
-
 #if AS_BACKUP
    AS_BSOCK_PROXY proxy;
    proxy.init(jcr->ase);
    AS_BSOCK_PROXY *sd = &proxy;
-#else
+#else /* AS_BACKUP */
    BSOCK *sd = jcr->store_bsock;
-#endif
-
-
-   // AS TODO tu lub wyżej sprawdzić czy plik > 5MB, jeśli tak to nie idzie do workera i
-   // leci bezpośrednio do socketa (no właśnie, ale socket może być zajęty buforami z workera
-   //...
-   // jeśli <= 5MB - do workera
-
-
-
-
-   // AS TODO pierwsze miejsce gdzie wysyłane są dane do socketa
-   // od tego miejsca w dół już musimy ładować się z danymi do bufora w workerze
-
-
+#endif /* !AS_BACKUP */
 
    if (do_plugin_set) {
       /* Tell bfile that it needs to call plugin */
-
-      // TODO uwaga - operujemy na kopii ff_pkt
       if (!set_cmd_plugin(&ff_pkt->bfd, jcr)) {
          goto bail_out;
       }
-      // AS TODO sprawdzić czy tu mają być jakieś mutexy
       send_plugin_name(jcr, sd, true);      /* signal start of plugin data */
       plugin_started = true;
    }
 
    /** Send attributes -- must be done after binit() */
-   // AS TODO sprawdzić czy tu mają być jakieś mutexy
 #if AS_BACKUP
    if (!encode_and_send_attributes_via_proxy(jcr, ff_pkt, data_stream, sd, &jcr_jobfiles)) {
-#else
+#else /* AS_BACKUP */
    if (!encode_and_send_attributes(jcr, ff_pkt, data_stream)) {
-#endif
+#endif /* !AS_BACKUP */
       goto bail_out;
    }
    /** Meta data only for restore object */
@@ -791,10 +739,8 @@ int as_save_file(
       goto good_rtn;
    }
 
-   // TODO CRYPTO
    /** Set up the encryption context and send the session data to the SD */
    if (has_file_data && jcr->crypto.pki_encrypt) {
-      // AS TODO sprawdzić czy tu mają być jakieś mutexy
       if (!crypto_session_send(jcr, sd)) {
          goto bail_out;
       }
@@ -827,33 +773,22 @@ int as_save_file(
       btimer_t *tid;
 
       if (ff_pkt->type == FT_FIFO) {
-         // AS TODO sprawdzić czy można uruchomić kilka timer threadów
          tid = start_thread_timer(jcr, pthread_self(), 60);
       } else {
          tid = NULL;
       }
       int noatime = ff_pkt->flags & FO_NOATIME ? O_NOATIME : 0;
-      // TODO uwaga - operujemy na kopii ff_pkt
       ff_pkt->bfd.reparse_point = (ff_pkt->type == FT_REPARSE ||
                                    ff_pkt->type == FT_JUNCTION);
 
-// AS TODO
-
-      // AS TODO sprawdzić czy tu mają być jakieś mutexy
       if (bopen(&ff_pkt->bfd, ff_pkt->fname, O_RDONLY | O_BINARY | noatime, 0) < 0) {
-
-         // TODO uwaga - operujemy na kopii ff_pkt
          ff_pkt->ff_errno = errno;
          berrno be;
 
          JCR_P
-
          Jmsg(jcr, M_NOTSAVED, 0, _("     Cannot open \"%s\": ERR=%s.\n"), ff_pkt->fname,
               be.bstrerror());
-
-         // AS TODO o , tutaj muteks !
          jcr->JobErrors++;
-
          JCR_V
 
          if (tid) {
@@ -867,30 +802,23 @@ int as_save_file(
          tid = NULL;
       }
 
-      // AS TODO sprawdzić czy tu mają być jakieś mutexy
-      // AS TODO ta funkcja też ma pompować dane do bufora zamiast socketa
       stat = send_data(jcr, data_stream, ff_pkt, digest, signing_digest
 #if AS_BACKUP
          , sd, jcr_jobfiles
-#endif
+#endif /* AS_BACKUP */
       );
 
       if (ff_pkt->flags & FO_CHKCHANGES) {
-    	  // TODO jcr locking in this function
          has_file_changed(jcr, ff_pkt);
       }
 
-      // AS TODO sprawdzić czy tu mają być jakieś mutexy
       bclose(&ff_pkt->bfd);
-
-// AS TODO
 
       if (!stat) {
          goto bail_out;
       }
    }
 
-   // AS TODO sprawdzić czy tu mają być jakieś mutexy
    if (have_darwin_os) {
       /** Regular files can have resource forks and Finder Info */
       if (ff_pkt->type != FT_LNKSAVED && (S_ISREG(ff_pkt->statp.st_mode) &&
@@ -899,26 +827,21 @@ int as_save_file(
             int flags;
             int rsrc_stream;
             if (!bopen_rsrc(&ff_pkt->bfd, ff_pkt->fname, O_RDONLY | O_BINARY, 0) < 0) {
-               // TODO uwaga - operujemy na kopii ff_pkt
                ff_pkt->ff_errno = errno;
                berrno be;
 
                JCR_P
-
                Jmsg(jcr, M_NOTSAVED, -1, _("     Cannot open resource fork for \"%s\": ERR=%s.\n"),
                     ff_pkt->fname, be.bstrerror());
                jcr->JobErrors++;
-
                JCR_V
 
                if (is_bopen(&ff_pkt->bfd)) {
-                  // TODO uwaga - operujemy na kopii ff_pkt
                   bclose(&ff_pkt->bfd);
                }
                goto good_rtn;
             }
             flags = ff_pkt->flags;
-            // TODO uwaga - operujemy na kopii ff_pkt
             ff_pkt->flags &= ~(FO_COMPRESS|FO_SPARSE|FO_OFFSETS);
             if (flags & FO_ENCRYPT) {
                rsrc_stream = STREAM_ENCRYPTED_MACOS_FORK_DATA;
@@ -927,12 +850,10 @@ int as_save_file(
             }
             stat = send_data(jcr, rsrc_stream, ff_pkt, digest, signing_digest
 #if AS_BACKUP
-                  , sd, jcr_jobfiles
+               , sd, jcr_jobfiles
 #endif
             );
-            // TODO uwaga - operujemy na kopii ff_pkt
             ff_pkt->flags = flags;
-            // TODO uwaga - operujemy na kopii ff_pkt
             bclose(&ff_pkt->bfd);
             if (!stat) {
                goto bail_out;
@@ -961,13 +882,9 @@ int as_save_file(
     * Save ACLs when requested and available for anything not being a symlink
     * and not being a plugin.
     */
-   // AS TODO sprawdzić czy tu mają być jakieś mutexy
-   // szczególnie JCR
    if (have_acl) {
       if (ff_pkt->flags & FO_ACL && ff_pkt->type != FT_LNK && !ff_pkt->cmd_plugin) {
-
-
-    	  // TODO uzyc bcosk proxy
+         // TODO use bsock proxy
          switch (build_acl_streams(jcr, ff_pkt)) {
          case bacl_exit_fatal:
             goto bail_out;
@@ -977,7 +894,7 @@ int as_save_file(
              * ACL_REPORT_ERR_MAX_PER_JOB print the error message set by the
              * lower level routine in jcr->errmsg.
              */
-        	 JCR_P
+            JCR_P
             if (jcr->acl_data->u.build->nr_errors < ACL_REPORT_ERR_MAX_PER_JOB) {
                Jmsg(jcr, M_WARNING, 0, "%s", jcr->errmsg);
             }
@@ -994,12 +911,9 @@ int as_save_file(
     * Save Extended Attributes when requested and available for all files not
     * being a plugin.
     */
-   // AS TODO sprawdzić czy tu mają być jakieś mutexy
    if (have_xattr) {
       if (ff_pkt->flags & FO_XATTR && !ff_pkt->cmd_plugin) {
-
-
-    	  // TODO uzyc bsock proxy
+         // TODO use bsock proxy
          switch (build_xattr_streams(jcr, ff_pkt)) {
          case bxattr_exit_fatal:
             goto bail_out;
@@ -1009,7 +923,7 @@ int as_save_file(
              * XATTR_REPORT_ERR_MAX_PER_JOB print the error message set by the
              * lower level routine in jcr->errmsg.
              */
-        	 JCR_P
+            JCR_P
             if (jcr->xattr_data->u.build->nr_errors < XATTR_REPORT_ERR_MAX_PER_JOB) {
                Jmsg(jcr, M_WARNING, 0, "%s", jcr->errmsg);
             }
@@ -1027,13 +941,12 @@ int as_save_file(
       uint32_t size = 0;
 
       if ((sig = crypto_sign_new(jcr)) == NULL) {
-    	  JCR_SCOPED_LOCK
+         JCR_SCOPED_LOCK
          Jmsg(jcr, M_FATAL, 0, _("Failed to allocate memory for crypto signature.\n"));
          goto bail_out;
       }
 
-
-      // TODO muteks?? jcr->crypto.pki_keypair lub jcr->crypto per w�tek???
+      // TODO check if can use JCR_SCOPED_LOCK inside the block
       JCR_P
       if (!crypto_sign_add_signer(sig, signing_digest, jcr->crypto.pki_keypair)) {
          Jmsg(jcr, M_FATAL, 0, _("An error occurred while adding signer the stream.\n"));
@@ -1044,7 +957,7 @@ int as_save_file(
 
       /** Get signature size */
       if (!crypto_sign_encode(sig, NULL, &size)) {
-    	  JCR_SCOPED_LOCK
+         JCR_SCOPED_LOCK
          Jmsg(jcr, M_FATAL, 0, _("An error occurred while signing the stream.\n"));
          goto bail_out;
       }
@@ -1061,7 +974,7 @@ int as_save_file(
 
       /** Encode signature data */
       if (!crypto_sign_encode(sig, (uint8_t *)sd->msg, &size)) {
-    	  JCR_SCOPED_LOCK
+         JCR_SCOPED_LOCK
          Jmsg(jcr, M_FATAL, 0, _("An error occurred while signing the stream.\n"));
          goto bail_out;
       }
@@ -1086,16 +999,13 @@ int as_save_file(
       }
 
       if (!crypto_digest_finalize(digest, (uint8_t *)sd->msg, &size)) {
-    	  JCR_SCOPED_LOCK
+         JCR_SCOPED_LOCK
          Jmsg(jcr, M_FATAL, 0, _("An error occurred finalizing signing the stream.\n"));
          goto bail_out;
       }
 
       /* Keep the checksum if this file is a hardlink */
-      // AS TODO sprawdzić czy tu mają być jakieś mutexy
-      // AS TODO a moze coś innego?
       if (ff_pkt->linked) {
-         // TODO uwaga - operujemy na kopii ff_pkt
          ff_pkt_set_link_digest(ff_pkt, digest_stream, sd->msg, size);
       }
 
@@ -1110,7 +1020,6 @@ int as_save_file(
 
       sd->fsend("%ld %d 0", jcr_jobfiles, ff_pkt->digest_stream);
 
-      // AS TODO UWAGA !!!! AS_BSOCK_PROXY powinno używać bufory z mempoola!!!
       sd->msg = check_pool_memory_size(sd->msg, ff_pkt->digest_len);
       memcpy(sd->msg, ff_pkt->digest, ff_pkt->digest_len);
       sd->msglen = ff_pkt->digest_len;
@@ -1119,47 +1028,22 @@ int as_save_file(
       sd->signal(BNET_EOD);              /* end of hardlink record */
    }
 
-
-   // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
-
-   // AS TODO zrobić funkcje save_data_continue, która w zależności czy z kontekstu wątku
-   // workera czy nie albo używa muteksów albo nie
-   // i albo wrzuca dane do bufora albo do socketa bezpośrednio (?)
-
-   // AS TODO
-   // * wysyłanie danych do socketa dla plików > 5MB
-   // musi odbywać się tak, że do kolejki buforów które są wysyłane do socketa
-   // jest wrzucany element, który tak na prawde nie jest budoforem, ale
-   // jego wysyłanie będzie się działo sekwencyjnie w miarę odczytywania pliku
-   // * rozwiązanie #2 dla dużych plików: pierwszy duży plik w kolejce otrzyma
-   // ekstra bufor tak, aby możliwe było podwójne buforowanie
-   // * rozwiązanie #3 pierwszy duży plik w kolejce otrzyma
-   // ekstra bufor tak a następnie każdy kolejny zwolniony bufor aż
-   // zostanie wysłany w całości,
-
 good_rtn:
    rtnstat = 1;
 
 bail_out:
-   // AS TODO jak job jest zatrzymany to powinniśmy wyczyścić całą work queue i
-   // uwalić wszystkie wątki
-	JCR_P
+   JCR_P
    if (jcr->is_canceled()) {
       Dmsg0(100, "Job canceled by user.\n");
       rtnstat = 0;
    }
-	JCR_V
+   JCR_V
 
    if (plugin_started) {
-      // AS TODO ładujemy to do bufora
       send_plugin_name(jcr, sd, false); /* signal end of plugin data */
    }
    if (ff_pkt->opt_plugin) {
-      // AS TODO tutaj jakiś mutex do jcr'a
-      // a może raczej trzeba sprawdzić czy ktoś jeszcze używa i dopiero
-      // zerować jak wszyscy skończą
-
-	   JCR_SCOPED_LOCK
+      JCR_SCOPED_LOCK
       jcr->plugin_sp = NULL;    /* sp is local to this function */
       jcr->plugin_ctx = NULL;
       jcr->plugin = NULL;
@@ -1180,7 +1064,6 @@ bail_out:
    dump_consumer_queue_locked();
 #endif
 
-   // AS TODO zasygnalizować koniec przesyłania całego pliku do AS_BSOCK_PROXY
 #if AS_BACKUP
    proxy.cleanup();
    as_free_ff_pkt_clone(ff_pkt);
@@ -1230,7 +1113,6 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
 
    Dmsg1(300, "Saving data, type=%d\n", ff_pkt->type);
 
-   // TODO obs�uga kompresji - bufor per w�tek
 #if defined(HAVE_LIBZ) || defined(HAVE_LZO)
    uLong compress_len = 0;
    uLong max_compress_len = 0;
@@ -1247,8 +1129,6 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
          max_compress_len = jcr->compress_buf_size; /* set max length */
       }
 
-      // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
-      // Problem: jest jeden compress buffer a potrzeba ich wiele...
       wbuf = jcr->compress_buf;    /* compressed output here */
       cipher_input = (uint8_t *)jcr->compress_buf; /* encrypt compressed data */
 
@@ -1258,16 +1138,11 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
        * deflate.
        */
 
-      // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
-      // Problem: czy to jcr->pZLIB_compress_workset może być dzielone między wiele wątków
       if (((z_stream*)jcr->pZLIB_compress_workset)->total_in == 0) {
          /** set gzip compression level - must be done per file */
          if ((zstat=deflateParams((z_stream*)jcr->pZLIB_compress_workset,
               ff_pkt->Compress_level, Z_DEFAULT_STRATEGY)) != Z_OK) {
             Jmsg(jcr, M_FATAL, 0, _("Compression deflateParams error: %d\n"), zstat);
-            // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
-            // AS TODO wszędzie trzeba sprawdzać czy job nie został przerwany -
-            // bo wtedy cały work queue trzeba uwalić i konsumenta też
             jcr->setJobStatus(JS_ErrorTerminated);
             goto err;
          }
@@ -1304,17 +1179,15 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
 
    if (ff_pkt->flags & FO_ENCRYPT) {
       if ((ff_pkt->flags & FO_SPARSE) || (ff_pkt->flags & FO_OFFSETS)) {
-    	  JCR_SCOPED_LOCK
+         JCR_SCOPED_LOCK
          Jmsg0(jcr, M_FATAL, 0, _("Encrypting sparse or offset data not supported.\n"));
          goto err;
       }
       /** Allocate the cipher context */
-      // TODO powielic per w�tek
       if ((cipher_ctx = crypto_cipher_new(jcr->crypto.pki_session, true,
            &cipher_block_size)) == NULL) {
          /* Shouldn't happen! */
-
-    	  JCR_SCOPED_LOCK
+         JCR_SCOPED_LOCK
          Jmsg0(jcr, M_FATAL, 0, _("Failed to initialize encryption context.\n"));
          goto err;
       }
@@ -1326,11 +1199,6 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
        * could be returned for the given read buffer size.
        * (Using the larger of either rsize or max_compress_len)
        */
-
-      // TODO trzeba to naprawic
-      // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
-      // i znowu: współdzielony bufor dla wielu wątków
-      // pewnie trzeba tyle buforów ile wątków jest
       jcr->crypto.crypto_buf = check_pool_memory_size(jcr->crypto.crypto_buf,
            (MAX(rsize + (int)sizeof(uint32_t), (int32_t)max_compress_len) +
             cipher_block_size - 1) / cipher_block_size * cipher_block_size);
@@ -1344,8 +1212,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
     */
    if (!sd->fsend("%ld %d %lld", jcr_jobfiles, stream,
         (int64_t)ff_pkt->statp.st_size)) {
-      // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
-	   JCR_SCOPED_LOCK
+      JCR_SCOPED_LOCK
       if (!jcr->is_job_canceled()) {
          Jmsg1(jcr, M_FATAL, 0, _("Network send error to SD. ERR=%s\n"),
                sd->bstrerror());
@@ -1379,7 +1246,6 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
    /**
     * Read the file data
     */
-   // TODO uwaga - operujemy na kopii ff_pkt
    while ((sd->msglen=(uint32_t)bread(&ff_pkt->bfd, rbuf, rsize)) > 0) {
 
       /** Check for sparse blocks */
@@ -1409,7 +1275,6 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
       }
 
       JCR_P
-      // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
       jcr->ReadBytes += sd->msglen;         /* count bytes read */
       JCR_V
 
@@ -1417,18 +1282,15 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
       cipher_input_len = sd->msglen;
 
       /** Update checksum if requested */
-      // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
       if (digest) {
          crypto_digest_update(digest, (uint8_t *)rbuf, sd->msglen);
       }
 
       /** Update signing digest if requested */
-      // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
       if (signing_digest) {
          crypto_digest_update(signing_digest, (uint8_t *)rbuf, sd->msglen);
       }
 
-      // TODO do zrobienia
 #ifdef HAVE_LIBZ
       /** Do compression if turned on */
       if (ff_pkt->flags & FO_COMPRESS && ff_pkt->Compress_algo == COMPRESS_GZIP && jcr->pZLIB_compress_workset) {
@@ -1439,12 +1301,8 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
          ((z_stream*)jcr->pZLIB_compress_workset)->next_out  = (Bytef *)cbuf;
                 ((z_stream*)jcr->pZLIB_compress_workset)->avail_out = max_compress_len;
 
-         // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
-         // znowu: czy  jcr->pZLIB_compress_workset może być współdzielony przez wiele wątków
          if ((zstat=deflate((z_stream*)jcr->pZLIB_compress_workset, Z_FINISH)) != Z_STREAM_END) {
             Jmsg(jcr, M_FATAL, 0, _("Compression deflate error: %d\n"), zstat);
-            // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
-            // a może jak job jest uwalony to powinien być condition variable???
             jcr->setJobStatus(JS_ErrorTerminated);
             goto err;
          }
@@ -1473,10 +1331,6 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
 
          Dmsg3(400, "cbuf=0x%x rbuf=0x%x len=%u\n", cbuf, rbuf, sd->msglen);
 
-
-         // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
-         // Problem: czy to jcr->LZO_compress_workset może być dzielone między wiele wątków
-
          lzores = lzo1x_1_compress((const unsigned char*)rbuf, sd->msglen, cbuf2,
                                    &len, jcr->LZO_compress_workset);
          compress_len = len;
@@ -1489,8 +1343,6 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
          } else {
             /** this should NEVER happen */
             Jmsg(jcr, M_FATAL, 0, _("Compression LZO error: %d\n"), lzores);
-            // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
-            // a może jak job jest uwalony to powinien być condition variable???
             jcr->setJobStatus(JS_ErrorTerminated);
             goto err;
          }
@@ -1503,8 +1355,6 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
          cipher_input_len = compress_len;
       }
 #endif
-
-      // TODO cale krypto do zrobienia razem z muteksami i buforami do krypto per watek
 
       /**
        * Note, here we prepend the current record length to the beginning
@@ -1564,8 +1414,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
       }
       sd->msg = wbuf;              /* set correct write buffer */
       if (!sd->send()) {
-
-    	  JCR_SCOPED_LOCK
+         JCR_SCOPED_LOCK
          if (!jcr->is_job_canceled()) {
             Jmsg1(jcr, M_FATAL, 0, _("Network send error to SD. ERR=%s\n"),
                   sd->bstrerror());
@@ -1594,10 +1443,6 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
        * For encryption, we must call finalize to push out any
        *  buffered data.
        */
-
-      // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
-      // i znowu bufor dzielony między wiele wątków - potrzeba będzie wiele buforów
-
       if (!crypto_cipher_finalize(cipher_ctx, (uint8_t *)jcr->crypto.crypto_buf,
            &encrypted_len)) {
          /* Padding failed. Shouldn't happen. */
@@ -1610,8 +1455,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
          sd->msglen = encrypted_len;      /* set encrypted length */
          sd->msg = jcr->crypto.crypto_buf;       /* set correct write buffer */
          if (!sd->send()) {
-
-        	 JCR_SCOPED_LOCK
+            JCR_SCOPED_LOCK
             if (!jcr->is_job_canceled()) {
                Jmsg1(jcr, M_FATAL, 0, _("Network send error to SD. ERR=%s\n"),
                      sd->bstrerror());
@@ -1628,7 +1472,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
 
    if (!sd->signal(BNET_EOD)) {        /* indicate end of file data */
 
-  	 JCR_SCOPED_LOCK
+      JCR_SCOPED_LOCK
 
       if (!jcr->is_job_canceled()) {
          Jmsg1(jcr, M_FATAL, 0, _("Network send error to SD. ERR=%s\n"),
@@ -1672,7 +1516,6 @@ bool encode_and_send_attributes(JCR *jcr, FF_PKT *ff_pkt, int &data_stream)
 
    Dmsg1(300, "encode_and_send_attrs fname=%s\n", ff_pkt->fname);
    /** Find what data stream we will use, then encode the attributes */
-   // TODO uwaga - operujemy na kopii ff_pkt
    if ((data_stream = select_data_stream(ff_pkt)) == STREAM_NONE) {
       /* This should not happen */
       Jmsg0(jcr, M_FATAL, 0, _("Invalid file flags, no supported data stream type.\n"));
@@ -1692,8 +1535,6 @@ bool encode_and_send_attributes(JCR *jcr, FF_PKT *ff_pkt, int &data_stream)
 
    jcr->lock();
    jcr->JobFiles++;                    /* increment number of files sent */
-   // TODO poza tym co z dostepem z wielu wątków
-   // TODO uwaga - operujemy na kopii ff_pkt
    ff_pkt->FileIndex = jcr->JobFiles;  /* return FileIndex */
    pm_strcpy(jcr->last_fname, ff_pkt->fname);
    jcr->unlock();
@@ -1763,22 +1604,18 @@ bool encode_and_send_attributes(JCR *jcr, FF_PKT *ff_pkt, int &data_stream)
    case FT_PLUGIN_CONFIG:
    case FT_RESTORE_FIRST:
       comp_len = ff_pkt->object_len;
-      // TODO uwaga - operujemy na kopii ff_pkt
       ff_pkt->object_compression = 0;
       if (ff_pkt->object_len > 1000) {
          /* Big object, compress it */
          comp_len = ff_pkt->object_len + 1000;
          POOLMEM *comp_obj = get_memory(comp_len);
          /* *** FIXME *** check Zdeflate error */
-         // TODO uwaga - operujemy na kopii ff_pkt
          Zdeflate(ff_pkt->object, ff_pkt->object_len, comp_obj, comp_len);
          if (comp_len < ff_pkt->object_len) {
-            // TODO uwaga - operujemy na kopii ff_pkt
             ff_pkt->object = comp_obj;
             ff_pkt->object_compression = 1;    /* zlib level 9 compression */
          } else {
             /* Uncompressed object smaller, use it */
-            // TODO uwaga - operujemy na kopii ff_pkt
             comp_len = ff_pkt->object_len;
          }
          Dmsg2(100, "Object compressed from %d to %d bytes\n", ff_pkt->object_len, comp_len);
@@ -1793,7 +1630,6 @@ bool encode_and_send_attributes(JCR *jcr, FF_PKT *ff_pkt, int &data_stream)
       sd->msglen += comp_len + 1;
       stat = sd->send();
       if (ff_pkt->object_compression) {
-         // TODO uwaga - operujemy na kopii ff_pkt
          free_and_null_pool_memory(ff_pkt->object);
       }
       break;
@@ -1810,7 +1646,6 @@ bool encode_and_send_attributes(JCR *jcr, FF_PKT *ff_pkt, int &data_stream)
    }
 
    if (!IS_FT_OBJECT(ff_pkt->type) && ff_pkt->type != FT_DELETED) {
-      // TODO uwaga - operujemy na kopii ff_pkt
       unstrip_path(ff_pkt);
    }
 
@@ -1823,6 +1658,7 @@ bool encode_and_send_attributes(JCR *jcr, FF_PKT *ff_pkt, int &data_stream)
    return stat;
 }
 
+#if AS_BACKUP
 static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &data_stream, AS_BSOCK_PROXY *sd, int *jcr_jobfiles)
 {
    char attribs[MAXSTRING];
@@ -1839,7 +1675,6 @@ static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &
 
    Dmsg1(300, "encode_and_send_attrs fname=%s\n", ff_pkt->fname);
    /** Find what data stream we will use, then encode the attributes */
-   // TODO uwaga - operujemy na kopii ff_pkt
    if ((data_stream = select_data_stream(ff_pkt)) == STREAM_NONE) {
       /* This should not happen */
       JCR_SCOPED_LOCK
@@ -1861,8 +1696,6 @@ static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &
 
    jcr->lock();
    jcr->JobFiles++;                    /* increment number of files sent */
-   // TODO poza tym co z dostepem z wielu wątków
-   // TODO uwaga - operujemy na kopii ff_pkt
    ff_pkt->FileIndex = jcr->JobFiles;  /* return FileIndex */
    pm_strcpy(jcr->last_fname, ff_pkt->fname);
    jcr_jobfiles_snapshot = jcr->JobFiles;
@@ -1942,22 +1775,18 @@ static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &
    case FT_PLUGIN_CONFIG:
    case FT_RESTORE_FIRST:
       comp_len = ff_pkt->object_len;
-      // TODO uwaga - operujemy na kopii ff_pkt
       ff_pkt->object_compression = 0;
       if (ff_pkt->object_len > 1000) {
          /* Big object, compress it */
          comp_len = ff_pkt->object_len + 1000;
          POOLMEM *comp_obj = get_memory(comp_len);
          /* *** FIXME *** check Zdeflate error */
-         // TODO uwaga - operujemy na kopii ff_pkt
          Zdeflate(ff_pkt->object, ff_pkt->object_len, comp_obj, comp_len);
          if (comp_len < ff_pkt->object_len) {
-            // TODO uwaga - operujemy na kopii ff_pkt
             ff_pkt->object = comp_obj;
             ff_pkt->object_compression = 1;    /* zlib level 9 compression */
          } else {
             /* Uncompressed object smaller, use it */
-            // TODO uwaga - operujemy na kopii ff_pkt
             comp_len = ff_pkt->object_len;
          }
          Dmsg2(100, "Object compressed from %d to %d bytes\n", ff_pkt->object_len, comp_len);
@@ -1972,7 +1801,6 @@ static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &
       sd->msglen += comp_len + 1;
       stat = sd->send();
       if (ff_pkt->object_compression) {
-         // TODO uwaga - operujemy na kopii ff_pkt
          free_and_null_pool_memory(ff_pkt->object);
       }
       break;
@@ -1989,7 +1817,6 @@ static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &
    }
 
    if (!IS_FT_OBJECT(ff_pkt->type) && ff_pkt->type != FT_DELETED) {
-      // TODO uwaga - operujemy na kopii ff_pkt
       unstrip_path(ff_pkt);
    }
 
@@ -2005,6 +1832,7 @@ static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &
    sd->signal(BNET_EOD);            /* indicate end of attributes data */
    return stat;
 }
+#endif /* AS_BACKUP */
 
 /**
  * Do in place strip of path

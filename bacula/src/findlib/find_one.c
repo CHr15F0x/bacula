@@ -232,28 +232,35 @@ bool has_file_changed(JCR *jcr, FF_PKT *ff_pkt)
 
    if (lstat(ff_pkt->fname, &statp) != 0) {
       berrno be;
+      JCR_SCOPED_LOCK
       Jmsg(jcr, M_WARNING, 0,
            _("Cannot stat file %s: ERR=%s\n"),ff_pkt->fname,be.bstrerror());
       return true;
    }
 
    if (statp.st_mtime != ff_pkt->statp.st_mtime) {
+      JCR_P
       Jmsg(jcr, M_ERROR, 0, _("%s mtime changed during backup.\n"), ff_pkt->fname);
+      JCR_V
       Dmsg3(50, "%s mtime (%lld) changed during backup (%lld).\n", ff_pkt->fname,
             (int64_t)ff_pkt->statp.st_mtime, (int64_t)statp.st_mtime);
       return true;
    }
 
    if (statp.st_ctime != ff_pkt->statp.st_ctime) {
+      JCR_P
       Jmsg(jcr, M_ERROR, 0, _("%s ctime changed during backup.\n"), ff_pkt->fname);
+      JCR_V
       Dmsg3(50, "%s ctime (%lld) changed during backup (%lld).\n", ff_pkt->fname,
             (int64_t)ff_pkt->statp.st_ctime, (int64_t)statp.st_ctime);
       return true;
    }
 
    if ((int64_t)statp.st_size != (int64_t)ff_pkt->statp.st_size) {
+      JCR_P
       Jmsg(jcr, M_ERROR, 0, _("%s size of %lld changed during backup to %lld.n"),ff_pkt->fname,
          (int64_t)ff_pkt->statp.st_size, (int64_t)statp.st_size);
+      JCR_V
       Dmsg3(50, "%s size (%lld) changed during backup (%lld).\n", ff_pkt->fname,
             (int64_t)ff_pkt->statp.st_size, (int64_t)statp.st_size);
       return true;
