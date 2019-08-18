@@ -1,7 +1,3 @@
-2019-07-29  klis  <klis@EFUN54>
-
-	* src\filed\as_backup.c (as_acquire_buffer): 
-
               Changelog on version 7.0.5
 
 Release version 7.0.5

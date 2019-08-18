@@ -52,7 +52,7 @@ int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level);
 
 static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest, DIGEST *signature_digest
 #if AS_BACKUP
-      , AS_BSOCK_PROXY *sd, int jcr_jobfiles
+   , AS_BSOCK_PROXY *sd, int jcr_jobfiles
 #endif
 );
 
@@ -63,22 +63,11 @@ static bool crypto_session_start(JCR *jcr);
 static void crypto_session_end(JCR *jcr);
 
 #if AS_BACKUP
-#warning "\
-ASYNC    ASYNC    ASYNC    ASYNC    ASYNC\n\
-ASYNC    ASYNC    ASYNC    ASYNC    ASYNC\n\
-ASYNC    ASYNC    ASYNC    ASYNC    ASYNC\n\
-ASYNC    ASYNC    ASYNC    ASYNC    ASYNC\n\
-"
 static bool crypto_session_send(JCR *jcr, AS_BSOCK_PROXY *sd);
 #else
-#warning "\
-SYNC     SYNC     SYNC     SYNC     SYNC\n\
-SYNC     SYNC     SYNC     SYNC     SYNC\n\
-SYNC     SYNC     SYNC     SYNC     SYNC\n\
-SYNC     SYNC     SYNC     SYNC     SYNC\n\
-"
 static bool crypto_session_send(JCR *jcr, BSOCK *sd);
 #endif
+
 static void close_vss_backup_session(JCR *jcr);
 
 
@@ -422,8 +411,8 @@ static bool crypto_session_send(JCR *jcr, BSOCK *sd)
 {
    POOLMEM *msgsave;
 
-   JCR_LOCK_SCOPE
    /** Send our header */
+   JCR_P
    Dmsg2(100, "Send hdr fi=%ld stream=%d\n", jcr->JobFiles, STREAM_ENCRYPTED_SESSION_DATA);
    sd->fsend("%ld %d %lld", jcr->JobFiles, STREAM_ENCRYPTED_SESSION_DATA,
       (int64_t)jcr->ff->statp.st_size);
@@ -431,8 +420,7 @@ static bool crypto_session_send(JCR *jcr, BSOCK *sd)
    sd->msg = jcr->crypto.pki_session_encoded;
    sd->msglen = jcr->crypto.pki_session_encoded_size;
    jcr->JobBytes += sd->msglen;
-
-   JCR_UNLOCK_SCOPE
+   JCR_V
 
    Dmsg1(100, "Send data len=%d\n", sd->msglen);
    sd->send();
@@ -1039,7 +1027,7 @@ int as_save_file(
       uint32_t size = 0;
 
       if ((sig = crypto_sign_new(jcr)) == NULL) {
-    	  JCR_LOCK_SCOPE
+    	  JCR_SCOPED_LOCK
          Jmsg(jcr, M_FATAL, 0, _("Failed to allocate memory for crypto signature.\n"));
          goto bail_out;
       }
@@ -1056,7 +1044,7 @@ int as_save_file(
 
       /** Get signature size */
       if (!crypto_sign_encode(sig, NULL, &size)) {
-    	  JCR_LOCK_SCOPE
+    	  JCR_SCOPED_LOCK
          Jmsg(jcr, M_FATAL, 0, _("An error occurred while signing the stream.\n"));
          goto bail_out;
       }
@@ -1073,7 +1061,7 @@ int as_save_file(
 
       /** Encode signature data */
       if (!crypto_sign_encode(sig, (uint8_t *)sd->msg, &size)) {
-    	  JCR_LOCK_SCOPE
+    	  JCR_SCOPED_LOCK
          Jmsg(jcr, M_FATAL, 0, _("An error occurred while signing the stream.\n"));
          goto bail_out;
       }
@@ -1098,7 +1086,7 @@ int as_save_file(
       }
 
       if (!crypto_digest_finalize(digest, (uint8_t *)sd->msg, &size)) {
-    	  JCR_LOCK_SCOPE
+    	  JCR_SCOPED_LOCK
          Jmsg(jcr, M_FATAL, 0, _("An error occurred finalizing signing the stream.\n"));
          goto bail_out;
       }
@@ -1171,7 +1159,7 @@ bail_out:
       // a może raczej trzeba sprawdzić czy ktoś jeszcze używa i dopiero
       // zerować jak wszyscy skończą
 
-	   JCR_LOCK_SCOPE
+	   JCR_SCOPED_LOCK
       jcr->plugin_sp = NULL;    /* sp is local to this function */
       jcr->plugin_ctx = NULL;
       jcr->plugin = NULL;
@@ -1316,7 +1304,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
 
    if (ff_pkt->flags & FO_ENCRYPT) {
       if ((ff_pkt->flags & FO_SPARSE) || (ff_pkt->flags & FO_OFFSETS)) {
-    	  JCR_LOCK_SCOPE
+    	  JCR_SCOPED_LOCK
          Jmsg0(jcr, M_FATAL, 0, _("Encrypting sparse or offset data not supported.\n"));
          goto err;
       }
@@ -1326,7 +1314,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
            &cipher_block_size)) == NULL) {
          /* Shouldn't happen! */
 
-    	  JCR_LOCK_SCOPE
+    	  JCR_SCOPED_LOCK
          Jmsg0(jcr, M_FATAL, 0, _("Failed to initialize encryption context.\n"));
          goto err;
       }
@@ -1357,7 +1345,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
    if (!sd->fsend("%ld %d %lld", jcr_jobfiles, stream,
         (int64_t)ff_pkt->statp.st_size)) {
       // AS TODO poniżej: sprawdzić czy tu mają być jakieś mutexy
-	   JCR_LOCK_SCOPE
+	   JCR_SCOPED_LOCK
       if (!jcr->is_job_canceled()) {
          Jmsg1(jcr, M_FATAL, 0, _("Network send error to SD. ERR=%s\n"),
                sd->bstrerror());
@@ -1577,7 +1565,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
       sd->msg = wbuf;              /* set correct write buffer */
       if (!sd->send()) {
 
-    	  JCR_LOCK_SCOPE
+    	  JCR_SCOPED_LOCK
          if (!jcr->is_job_canceled()) {
             Jmsg1(jcr, M_FATAL, 0, _("Network send error to SD. ERR=%s\n"),
                   sd->bstrerror());
@@ -1595,7 +1583,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
 
    if (sd->msglen < 0) {                 /* error */
       berrno be;
-      JCR_LOCK_SCOPE
+      JCR_SCOPED_LOCK
       Jmsg(jcr, M_ERROR, 0, _("Read error on file %s. ERR=%s\n"),
          ff_pkt->fname, be.bstrerror(ff_pkt->bfd.berrno));
       if (jcr->JobErrors++ > 1000) {       /* insanity check */
@@ -1623,7 +1611,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
          sd->msg = jcr->crypto.crypto_buf;       /* set correct write buffer */
          if (!sd->send()) {
 
-        	 JCR_LOCK_SCOPE
+        	 JCR_SCOPED_LOCK
             if (!jcr->is_job_canceled()) {
                Jmsg1(jcr, M_FATAL, 0, _("Network send error to SD. ERR=%s\n"),
                      sd->bstrerror());
@@ -1640,7 +1628,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
 
    if (!sd->signal(BNET_EOD)) {        /* indicate end of file data */
 
-  	 JCR_LOCK_SCOPE
+  	 JCR_SCOPED_LOCK
 
       if (!jcr->is_job_canceled()) {
          Jmsg1(jcr, M_FATAL, 0, _("Network send error to SD. ERR=%s\n"),
@@ -1854,7 +1842,7 @@ static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &
    // TODO uwaga - operujemy na kopii ff_pkt
    if ((data_stream = select_data_stream(ff_pkt)) == STREAM_NONE) {
       /* This should not happen */
-      JCR_LOCK_SCOPE
+      JCR_SCOPED_LOCK
       Jmsg0(jcr, M_FATAL, 0, _("Invalid file flags, no supported data stream type.\n"));
       return false;
    }
@@ -1865,7 +1853,7 @@ static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &
       attr_stream = STREAM_RESTORE_OBJECT;
    } else {
       attribsEx = attribsExBuf;
-      JCR_LOCK_SCOPE // TODO lock needed?
+      JCR_SCOPED_LOCK
       attr_stream = encode_attribsEx(jcr, attribsEx, ff_pkt);
    }
 
@@ -1883,7 +1871,7 @@ static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &
 
    /* Debug code: check if we must hangup */
    if (hangup && (jcr_jobfiles_snapshot > (uint32_t)hangup)) {
-      JCR_LOCK_SCOPE
+      JCR_SCOPED_LOCK
       Jmsg1(jcr, M_FATAL, 0, "Debug hangup requested after %d files.\n", hangup);
       set_hangup(0);
       return false;
@@ -1900,7 +1888,7 @@ static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &
 #endif
 
    if (!sd->fsend("%ld %d 0", jcr_jobfiles_snapshot, attr_stream)) {
-      JCR_LOCK_SCOPE // TODO jcr->job status is volatile but not atomic
+      JCR_SCOPED_LOCK
       if (!jcr->is_canceled()) {
          Jmsg1(jcr, M_FATAL, 0, _("Network send error to SD. ERR=%s\n"),
                sd->bstrerror());

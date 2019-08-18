@@ -23,154 +23,6 @@
 #include "stored.h"
 
 
-
-#define KLDEBUG 0
-#define KLDEBUG_FILE_IDX 0
-
-
-static const char *KL_stream_to_ascii(int stream)
-{
-   static char buf[20];
-
-   switch (stream & STREAMMASK_TYPE) {
-   case STREAM_UNIX_ATTRIBUTES:
-      return _("Unix attributes");
-   case STREAM_FILE_DATA:
-      return _("File data");
-   case STREAM_MD5_DIGEST:
-      return _("MD5 digest");
-   case STREAM_GZIP_DATA:
-      return _("GZIP data");
-   case STREAM_COMPRESSED_DATA:
-      return _("Compressed data");
-   case STREAM_UNIX_ATTRIBUTES_EX:
-      return _("Extended attributes");
-   case STREAM_SPARSE_DATA:
-      return _("Sparse data");
-   case STREAM_SPARSE_GZIP_DATA:
-      return _("GZIP sparse data");
-   case STREAM_SPARSE_COMPRESSED_DATA:
-      return _("Compressed sparse data");
-   case STREAM_PROGRAM_NAMES:
-      return _("Program names");
-   case STREAM_PROGRAM_DATA:
-      return _("Program data");
-   case STREAM_SHA1_DIGEST:
-      return _("SHA1 digest");
-   case STREAM_WIN32_DATA:
-      return _("Win32 data");
-   case STREAM_WIN32_GZIP_DATA:
-      return _("Win32 GZIP data");
-   case STREAM_WIN32_COMPRESSED_DATA:
-      return _("Win32 compressed data");
-   case STREAM_MACOS_FORK_DATA:
-      return _("MacOS Fork data");
-   case STREAM_HFSPLUS_ATTRIBUTES:
-      return _("HFS+ attribs");
-   case STREAM_UNIX_ACCESS_ACL:
-      return _("Standard Unix ACL attribs");
-   case STREAM_UNIX_DEFAULT_ACL:
-      return _("Default Unix ACL attribs");
-   case STREAM_SHA256_DIGEST:
-      return _("SHA256 digest");
-   case STREAM_SHA512_DIGEST:
-      return _("SHA512 digest");
-   case STREAM_SIGNED_DIGEST:
-      return _("Signed digest");
-   case STREAM_ENCRYPTED_FILE_DATA:
-      return _("Encrypted File data");
-   case STREAM_ENCRYPTED_WIN32_DATA:
-      return _("Encrypted Win32 data");
-   case STREAM_ENCRYPTED_SESSION_DATA:
-      return _("Encrypted session data");
-   case STREAM_ENCRYPTED_FILE_GZIP_DATA:
-      return _("Encrypted GZIP data");
-   case STREAM_ENCRYPTED_FILE_COMPRESSED_DATA:
-      return _("Encrypted compressed data");
-   case STREAM_ENCRYPTED_WIN32_GZIP_DATA:
-      return _("Encrypted Win32 GZIP data");
-   case STREAM_ENCRYPTED_WIN32_COMPRESSED_DATA:
-      return _("Encrypted Win32 Compressed data");
-   case STREAM_ENCRYPTED_MACOS_FORK_DATA:
-      return _("Encrypted MacOS fork data");
-   case STREAM_PLUGIN_NAME:
-      return _("Plugin Name");
-   case STREAM_PLUGIN_DATA:
-      return _("Plugin Data");
-   case STREAM_RESTORE_OBJECT:
-      return _("Restore Object");
-   case STREAM_ACL_AIX_TEXT:
-      return _("AIX Specific ACL attribs");
-   case STREAM_ACL_DARWIN_ACCESS_ACL:
-      return _("Darwin Specific ACL attribs");
-   case STREAM_ACL_FREEBSD_DEFAULT_ACL:
-      return _("FreeBSD Specific Default ACL attribs");
-   case STREAM_ACL_FREEBSD_ACCESS_ACL:
-      return _("FreeBSD Specific Access ACL attribs");
-   case STREAM_ACL_HPUX_ACL_ENTRY:
-      return _("HPUX Specific ACL attribs");
-   case STREAM_ACL_IRIX_DEFAULT_ACL:
-      return _("Irix Specific Default ACL attribs");
-   case STREAM_ACL_IRIX_ACCESS_ACL:
-      return _("Irix Specific Access ACL attribs");
-   case STREAM_ACL_LINUX_DEFAULT_ACL:
-      return _("Linux Specific Default ACL attribs");
-   case STREAM_ACL_LINUX_ACCESS_ACL:
-      return _("Linux Specific Access ACL attribs");
-   case STREAM_ACL_TRU64_DEFAULT_ACL:
-      return _("TRU64 Specific Default ACL attribs");
-   case STREAM_ACL_TRU64_ACCESS_ACL:
-      return _("TRU64 Specific Access ACL attribs");
-   case STREAM_ACL_SOLARIS_ACLENT:
-      return _("Solaris Specific POSIX ACL attribs");
-   case STREAM_ACL_SOLARIS_ACE:
-      return _("Solaris Specific NFSv4/ZFS ACL attribs");
-   case STREAM_ACL_AFS_TEXT:
-      return _("AFS Specific ACL attribs");
-   case STREAM_ACL_AIX_AIXC:
-      return _("AIX Specific POSIX ACL attribs");
-   case STREAM_ACL_AIX_NFS4:
-      return _("AIX Specific NFSv4 ACL attribs");
-   case STREAM_ACL_FREEBSD_NFS4_ACL:
-      return _("FreeBSD Specific NFSv4/ZFS ACL attribs");
-   case STREAM_ACL_HURD_DEFAULT_ACL:
-      return _("GNU Hurd Specific Default ACL attribs");
-   case STREAM_ACL_HURD_ACCESS_ACL:
-      return _("GNU Hurd Specific Access ACL attribs");
-   case STREAM_XATTR_HURD:
-      return _("GNU Hurd Specific Extended attribs");
-   case STREAM_XATTR_IRIX:
-      return _("IRIX Specific Extended attribs");
-   case STREAM_XATTR_TRU64:
-      return _("TRU64 Specific Extended attribs");
-   case STREAM_XATTR_AIX:
-      return _("AIX Specific Extended attribs");
-   case STREAM_XATTR_OPENBSD:
-      return _("OpenBSD Specific Extended attribs");
-   case STREAM_XATTR_SOLARIS_SYS:
-      return _("Solaris Specific Extensible attribs or System Extended attribs");
-   case STREAM_XATTR_SOLARIS:
-      return _("Solaris Specific Extended attribs");
-   case STREAM_XATTR_DARWIN:
-      return _("Darwin Specific Extended attribs");
-   case STREAM_XATTR_FREEBSD:
-      return _("FreeBSD Specific Extended attribs");
-   case STREAM_XATTR_LINUX:
-      return _("Linux Specific Extended attribs");
-   case STREAM_XATTR_NETBSD:
-      return _("NetBSD Specific Extended attribs");
-   default:
-      sprintf(buf, "%d", stream);
-      return (const char *)buf;
-   }
-}
-
-
-
-
-
-
-
 /* Responses sent to the File daemon */
 static char OK_data[]    = "3000 OK data\n";
 static char OK_append[]  = "3000 OK append data\n";
@@ -193,37 +45,19 @@ bool do_append_data(JCR *jcr)
    char ec[50];
 
 
-   uint64_t total_stream_len;
-
-
-
    if (!dcr) {
       pm_strcpy(jcr->errmsg, _("DCR is NULL!!!\n"));
       Jmsg0(jcr, M_FATAL, 0, jcr->errmsg);
-
-#if KLDEBUG
-      Pmsg0(50, "\t\t\t!!!! DCR is NULL!!!\n");
-#endif
-
       return false;
    }
    dev = dcr->dev;
    if (!dev) {
       pm_strcpy(jcr->errmsg, _("DEVICE is NULL!!!\n"));
       Jmsg0(jcr, M_FATAL, 0, jcr->errmsg);
-
-#if KLDEBUG
-      Pmsg0(50, "\t\t\t!!!! DEVICE is NULL!!!\n");
-#endif
-
       return false;
    }
 
    Dmsg1(100, "Start append data. res=%d\n", dev->num_reserved());
-
-#if KLDEBUG
-   Pmsg1(50, "\t\t\t!!!! Start append data. res=%d\n", dev->num_reserved());
-#endif
 
    memset(&rec, 0, sizeof(rec));
 
@@ -231,11 +65,6 @@ bool do_append_data(JCR *jcr)
       jcr->setJobStatus(JS_ErrorTerminated);
       pm_strcpy(jcr->errmsg, _("Unable to set network buffer size.\n"));
       Jmsg0(jcr, M_FATAL, 0, jcr->errmsg);
-
-#if KLDEBUG
-      Pmsg0(50, "\t\t\t!!!! Unable to set network buffer size.\n");
-#endif
-
       return false;
    }
 
@@ -249,17 +78,8 @@ bool do_append_data(JCR *jcr)
    //ASSERT(dev->VolCatInfo.VolCatName[0]);
    if (dev->VolCatInfo.VolCatName[0] == 0) {
       Pmsg0(000, _("NULL Volume name. This shouldn't happen!!!\n"));
-
-#if KLDEBUG
-      Pmsg0(50, "\t\t\t!!!! NULL Volume name. This shouldn't happen!!!\n");
-#endif
-
    }
    Dmsg1(50, "Begin append device=%s\n", dev->print_name());
-
-#if KLDEBUG
-   Pmsg1(50, "\t\t\t!!!! Begin append device=%s\n", dev->print_name());
-#endif
 
    begin_data_spool(dcr);
    begin_attribute_spool(jcr);
@@ -268,10 +88,6 @@ bool do_append_data(JCR *jcr)
    //ASSERT(dev->VolCatInfo.VolCatName[0]);
    if (dev->VolCatInfo.VolCatName[0] == 0) {
       Pmsg0(000, _("NULL Volume name. This shouldn't happen!!!\n"));
-
-#if KLDEBUG
-      Pmsg0(50, "\t\t\t!!!! NULL Volume name. This shouldn't happen!!!\n");
-#endif
    }
    /*
     * Write Begin Session Record
@@ -280,20 +96,11 @@ bool do_append_data(JCR *jcr)
       Jmsg1(jcr, M_FATAL, 0, _("Write session label failed. ERR=%s\n"),
          dev->bstrerror());
       jcr->setJobStatus(JS_ErrorTerminated);
-
-#if KLDEBUG
-      Pmsg1(50, "\t\t\t!!!! Write session label failed. ERR=%s\n", dev->bstrerror());
-#endif
-
       ok = false;
    }
    //ASSERT(dev->VolCatInfo.VolCatName[0]);
    if (dev->VolCatInfo.VolCatName[0] == 0) {
       Pmsg0(000, _("NULL Volume name. This shouldn't happen!!!\n"));
-
-#if KLDEBUG
-      Pmsg0(50, "\t\t\t!!!! NULL Volume name. This shouldn't happen!!!\n");
-#endif
    }
 
    /* Tell File daemon to send data */
@@ -301,11 +108,6 @@ bool do_append_data(JCR *jcr)
       berrno be;
       Jmsg1(jcr, M_FATAL, 0, _("Network send error to FD. ERR=%s\n"),
             be.bstrerror(fd->b_errno));
-
-#if KLDEBUG
-      Pmsg1(50, "\t\t\t!!!! Network send error to FD. ERR=%s\n", be.bstrerror(fd->b_errno));
-#endif
-
       ok = false;
    }
 
@@ -339,62 +141,24 @@ bool do_append_data(JCR *jcr)
        *       grow during the backup.
        */
      if ((n=bget_msg(fd)) <= 0) {
-
-
-    	 total_stream_len = 0;
-
-
          if (n == BNET_SIGNAL && fd->msglen == BNET_EOD) {
             Dmsg0(200, "Got EOD on reading header.\n");
-
-#if KLDEBUG
-            Pmsg0(50, "\t\t\t!!!! Got EOD on reading header.\n");
-#endif
-
             break;                    /* end of data */
          }
          Jmsg3(jcr, M_FATAL, 0, _("Error reading data header from FD. n=%d msglen=%d ERR=%s\n"),
                n, fd->msglen, fd->bstrerror());
-
-#if KLDEBUG
-         Pmsg3(50, "\t\t\t!!!! Error reading data header from FD. n=%d msglen=%d ERR=%s\n", n, fd->msglen, fd->bstrerror());
-#endif
-
          ok = false;
          break;
       }
 
       if (sscanf(fd->msg, "%ld %ld %lld", &file_index, &stream, &stream_len) != 3) {
          Jmsg1(jcr, M_FATAL, 0, _("Malformed data header from FD: %s\n"), fd->msg);
-
-#if KLDEBUG
-         Pmsg1(50, "\t\t\t!!!! Malformed data header from FD: %s\n", fd->msg);
-#endif
-
          ok = false;
          break;
       }
 
       Dmsg3(890, "<filed: Header FilInx=%d stream=%d stream_len=%lld\n",
          file_index, stream, stream_len);
-
-
-#if KLDEBUG_FILE_IDX
-
-      total_stream_len += stream_len;
-
-      Pmsg6(50, ">>>> APPEND Files=%d FilInx=%d stream=%d stream_len=%lld tot_stream_len=%lld %s\n",
-    	jcr->JobFiles, file_index, stream, stream_len, total_stream_len, KL_stream_to_ascii(stream));
-#endif
-
-
-#if KLDEBUG
-      Pmsg3(50, "\t\t\t!!!! <filed: Header FilInx=%d stream=%d stream_len=%lld\n",
-         file_index, stream, stream_len);
-
-      // KLIS
-      Pmsg1(50, "\t\t!!!! APPEND last_file_index: %d\n", last_file_index);
-#endif
 
       /*
        * We make sure the file_index is advancing sequentially.
@@ -403,26 +167,14 @@ bool do_append_data(JCR *jcr)
          goto fi_checked;
       }
       Dmsg2(400, "file_index=%d last_file_index=%d\n", file_index, last_file_index);
-
-#if KLDEBUG
-      Pmsg2(50, "\t\t\t!!!! file_index=%d last_file_index=%d\n", file_index, last_file_index);
-#endif
-
       if (file_index > 0 && (file_index == last_file_index ||
           file_index == last_file_index + 1)) {
          goto fi_checked;
       }
-
-     // TODO KLIS file indexes not coming in order right now
-     // TODO REMOVE IF 0
-      Pmsg2(50, "\t\t\t!!!! FI=%d from FD not positive or last_FI=%d\n", file_index, last_file_index);
-
-#if 1
       Jmsg2(jcr, M_FATAL, 0, _("FI=%d from FD not positive or last_FI=%d\n"),
             file_index, last_file_index);
       ok = false;
       break;
-#endif
 
 fi_checked:
       if (file_index != last_file_index) {
@@ -448,23 +200,10 @@ fi_checked:
             stream_to_ascii(buf1, rec.Stream,rec.FileIndex),
             rec.data_len);
 
-#if KLDEBUG
-         Pmsg4(50, "\t\t\t!!!! before writ_rec FI=%d SessId=%d Strm=%s len=%d\n",
-            rec.FileIndex, rec.VolSessionId,
-            stream_to_ascii(buf1, rec.Stream,rec.FileIndex),
-            rec.data_len);
-#endif
-
          ok = dcr->write_record(&rec);
          if (!ok) {
             Dmsg2(90, "Got write_block_to_dev error on device %s. %s\n",
                   dcr->dev->print_name(), dcr->dev->bstrerror());
-
-#if KLDEBUG
-            Pmsg2(50, "\t\t\t!!!! Got write_block_to_dev error on device %s. %s\n",
-                  dcr->dev->print_name(), dcr->dev->bstrerror());
-#endif
-
             break;
          }
          jcr->JobBytes += rec.data_len;   /* increment bytes this job */
@@ -472,33 +211,14 @@ fi_checked:
             FI_to_ascii(buf1, rec.FileIndex), rec.VolSessionId,
             stream_to_ascii(buf2, rec.Stream, rec.FileIndex), rec.data_len);
 
-#if KLDEBUG
-         Pmsg4(50, "\t\t\t!!!! write_record FI=%s SessId=%d Strm=%s len=%d\n",
-            FI_to_ascii(buf1, rec.FileIndex), rec.VolSessionId,
-            stream_to_ascii(buf2, rec.Stream, rec.FileIndex), rec.data_len);
-#endif
-
          send_attrs_to_dir(jcr, &rec);
          Dmsg0(650, "Enter bnet_get\n");
-
-#if KLDEBUG
-         Pmsg0(50, "\t\t\t!!!! Enter bnet_get\n");
-#endif
       }
       Dmsg2(650, "End read loop with FD. JobFiles=%d Stat=%d\n", jcr->JobFiles, n);
-
-#if KLDEBUG
-      Pmsg2(50, "\t\t\t!!!! End read loop with FD. JobFiles=%d Stat=%d\n", jcr->JobFiles, n);
-#endif
 
       if (fd->is_error()) {
          if (!jcr->is_job_canceled()) {
             Dmsg1(350, "Network read error from FD. ERR=%s\n", fd->bstrerror());
-
-#if KLDEBUG
-            Pmsg1(50, "\t\t\t!!!! Network read error from FD. ERR=%s\n", fd->bstrerror());
-#endif
-
             Jmsg1(jcr, M_FATAL, 0, _("Network error reading from FD. ERR=%s\n"),
                   fd->bstrerror());
          }
@@ -507,40 +227,18 @@ fi_checked:
       }
    }
 
-#if KLDEBUG
-            Pmsg1(50, "\t\t\t!!!! BEGIN setJobStatus ok=%d\n", ok);
-#endif
-
    /* Create Job status for end of session label */
    jcr->setJobStatus(ok?JS_Terminated:JS_ErrorTerminated);
 
-
-#if KLDEBUG
-            Pmsg1(50, "\t\t\t!!!! END setJobStatus ok=%d\n", ok);
-#endif
-
    if (ok) {
       /* Terminate connection with Client */
-#if KLDEBUG
-            Pmsg0(50, "\t\t\t!!!! fd->fsend(OK_append)\n");
-#endif
-
       fd->fsend(OK_append);
-
-#if KLDEBUG
-            Pmsg0(50, "\t\t\t!!!! do_client_commands(jcr)\n");
-#endif
-
       do_client_commands(jcr);            /* finish dialog with Client */
    } else {
       fd->fsend("3999 Failed append\n");
    }
 
    Dmsg1(200, "Write EOS label JobStatus=%c\n", jcr->JobStatus);
-
-#if KLDEBUG
-   Pmsg1(200, "\t\t\t!!!! Write EOS label JobStatus=%c\n", jcr->JobStatus);
-#endif
 
    /*
     * Check if we can still write. This may not be the case
@@ -552,10 +250,6 @@ fi_checked:
          if (ok && !jcr->is_job_canceled()) {
             Jmsg1(jcr, M_FATAL, 0, _("Error writing end session label. ERR=%s\n"),
                   dev->bstrerror());
-
-#if KLDEBUG
-            Pmsg1(50, "\t\t\t!!!! Error writing end session label. ERR=%s\n", dev->bstrerror());
-#endif
          }
          jcr->setJobStatus(JS_ErrorTerminated);
          ok = false;
@@ -567,10 +261,6 @@ fi_checked:
             Jmsg2(jcr, M_FATAL, 0, _("Fatal append error on device %s: ERR=%s\n"),
                   dev->print_name(), dev->bstrerror());
             Dmsg0(100, _("Set ok=FALSE after write_block_to_device.\n"));
-
-#if KLDEBUG
-            Pmsg0(50, "\t\t\t!!!! Set ok=FALSE after write_block_to_device.\n");
-#endif
          }
          jcr->setJobStatus(JS_ErrorTerminated);
          ok = false;
@@ -613,11 +303,6 @@ fi_checked:
    jcr->sendJobStatus();          /* update director */
 
    Dmsg1(100, "return from do_append_data() ok=%d\n", ok);
-
-#if KLDEBUG
-   Pmsg1(50, "\t\t\t!!!! return from do_append_data() ok=%d\n", ok);
-#endif
-
    return ok;
 }
 

@@ -767,7 +767,7 @@ bool send_plugin_name(JCR *jcr, BSOCK *sd, bool start)
 #endif
 {
    int stat;
-   JCR_LOCK_SCOPE
+   JCR_P
    int job_files = jcr->JobFiles;
    int index = jcr->JobFiles;
    struct save_pkt *sp = (struct save_pkt *)jcr->plugin_sp;
@@ -775,13 +775,15 @@ bool send_plugin_name(JCR *jcr, BSOCK *sd, bool start)
    Dsm_check(999);
    if (!sp) {
       Jmsg0(jcr, M_FATAL, 0, _("Plugin save packet not found.\n"));
+      JCR_V
       return false;
    }
    if (jcr->is_job_canceled()) {
+      JCR_V
       return false;
    }
 
-   JCR_UNLOCK_SCOPE
+   JCR_V
 
    if (start) {
       index++;                  /* JobFiles not incremented yet */
@@ -790,7 +792,7 @@ bool send_plugin_name(JCR *jcr, BSOCK *sd, bool start)
    /* Send stream header */
    Dsm_check(999);
    if (!sd->fsend("%ld %d 0", index, STREAM_PLUGIN_NAME)) {
-      JCR_LOCK_SCOPE
+     JCR_SCOPED_LOCK
      Jmsg1(jcr, M_FATAL, 0, _("Network send error to SD. ERR=%s\n"),
            sd->bstrerror());
      return false;
@@ -807,7 +809,7 @@ bool send_plugin_name(JCR *jcr, BSOCK *sd, bool start)
    }
    Dsm_check(999);
    if (!stat) {
-      JCR_LOCK_SCOPE
+      JCR_SCOPED_LOCK
       Jmsg1(jcr, M_FATAL, 0, _("Network send error to SD. ERR=%s\n"),
             sd->bstrerror());
          return false;
