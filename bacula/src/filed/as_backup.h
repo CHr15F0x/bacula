@@ -87,6 +87,8 @@ private:
    as_buffer_t *as_fix_fi_order_buffer;
    int as_last_file_idx;
 
+   uint32_t comp_usage;
+
 public:
 
    void init();
@@ -139,6 +141,13 @@ public:
    void as_workqueue_destroy();
 
    void as_shutdown(BSOCK *sd);
+
+   POOLMEM *compress_buf       [AS_PRODUCER_THREADS];
+   void *pZLIB_compress_workset[AS_PRODUCER_THREADS];
+   void *LZO_compress_workset  [AS_PRODUCER_THREADS];
+
+   int get_comp_idx();
+   void free_comp_idx(int idx);
 };
 
 /**

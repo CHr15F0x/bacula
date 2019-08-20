@@ -907,4 +907,23 @@ void AS_ENGINE::as_shutdown(BSOCK *sd)
 #endif
 }
 
+int AS_ENGINE::get_comp_idx()
+{
+   for (int i = 0; i < AS_PRODUCER_THREADS; ++i) {
+      if (comp_usage & 1u) {
+         comp_usage |= (1u << i);
+         return i;
+      }
+   }
+
+   return -1;
+}
+
+void AS_ENGINE::free_comp_idx(int idx)
+{
+   if ((idx >= 0) && (idx < AS_PRODUCER_THREADS)) {
+      comp_usage &= ~(1u << idx);
+   }
+}
+
 #endif /* AS_BACKUP */
