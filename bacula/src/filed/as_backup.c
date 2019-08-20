@@ -4,14 +4,16 @@
 #include "../findlib/find.h"
 #include "as_bsock_proxy.h"
 
-#define KLDEBUG 0
-#define KLDEBUG_LOOP 0
-#define KLDEBUG_CONS_ENQUEUE 0
-#define KLDEBUG_DEALLOC_BUFFERS 0
-#define KLDEBUG_CONS_QUEUE 0
-#define KLDEBUG_FI 0
-#define KLDEBUG_LOOP_DEQUEUE 0
-#define KLDEBUG_INIT_SHUT 0
+#if AS_BACKUP
+
+#define ASDEBUG 0
+#define ASDEBUG_LOOP 0
+#define ASDEBUG_CONS_ENQUEUE 0
+#define ASDEBUG_DEALLOC_BUFFERS 0
+#define ASDEBUG_CONS_QUEUE 0
+#define ASDEBUG_FI 0
+#define ASDEBUG_LOOP_DEQUEUE 0
+#define ASDEBUG_INIT_SHUT 0
 
 /* Used for debugging only */
 #define AS_BUFFER_BASE 1000
@@ -79,7 +81,7 @@ int AS_ENGINE::as_smallest_fi_in_consumer_queue()
 
 as_buffer_t *AS_ENGINE::as_acquire_buffer(AS_BSOCK_PROXY *parent, int file_idx)
 {
-#if KLDEBUG
+#if ASDEBUG
    Pmsg2(50, "\t\t>>>> %4d as_acquire_buffer() BEGIN parent: %4X\n",
       my_thread_id(), HH(parent));
 #endif
@@ -127,7 +129,7 @@ as_buffer_t *AS_ENGINE::as_acquire_buffer(AS_BSOCK_PROXY *parent, int file_idx)
          buffer->file_idx = 0;
          buffer->final = 0;
 
-#if KLDEBUG
+#if ASDEBUG
          Pmsg4(50, "\t\t>>>> %4d as_acquire_buffer() END parent: %4X, free size: %d, buf: %d\n",
             my_thread_id(), HH(parent), qsize(&as_free_buffer_queue), buffer->id);
 #endif
@@ -135,7 +137,7 @@ as_buffer_t *AS_ENGINE::as_acquire_buffer(AS_BSOCK_PROXY *parent, int file_idx)
       } else
       {
          /* No luck, let's wait until a free buffer shows up */
-#if KLDEBUG
+#if ASDEBUG
          P(as_consumer_queue_lock);
          Pmsg4(50, "\t\t>>>> %4d as_acquire_buffer() WAIT as_bigfile_bsock_proxy: %4X parent: %4X, free size: %d \n",
             my_thread_id(), HH(as_bigfile_bsock_proxy), HH(parent), qsize(&as_free_buffer_queue));
@@ -161,7 +163,7 @@ as_buffer_t *AS_ENGINE::as_acquire_buffer(AS_BSOCK_PROXY *parent, int file_idx)
 
 void AS_ENGINE::dump_consumer_queue()
 {
-#if KLDEBUG_CONS_QUEUE
+#if ASDEBUG_CONS_QUEUE
 
    as_buffer_t *buffer = (as_buffer_t *)qnext(&as_consumer_buffer_queue, NULL);
 
@@ -190,7 +192,7 @@ void AS_ENGINE::as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
 {
    P(as_consumer_queue_lock);
 
-#if KLDEBUG_CONS_ENQUEUE
+#if ASDEBUG_CONS_ENQUEUE
     Pmsg5(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d (%p), BEGIN bigfile: %4X, cons.q.size: %d\n",
        my_thread_id(), buffer->id, buffer, HH(as_bigfile_bsock_proxy),
        qsize(&as_consumer_buffer_queue));
@@ -204,7 +206,7 @@ void AS_ENGINE::as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
       buffer->final = 0;
    }
 
-#if KLDEBUG_FI
+#if ASDEBUG_FI
     Pmsg7(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d FI: %4d parent: %4X bigfile: %4X, final: %d cons.q.size: %d\n",
        my_thread_id(), buffer->id, buffer->file_idx, HH(buffer->parent), HH(as_bigfile_bsock_proxy),
 	   buffer->final, qsize(&as_consumer_buffer_queue));
@@ -212,7 +214,7 @@ void AS_ENGINE::as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize)
 
    qinsert(&as_consumer_buffer_queue, &buffer->bq);
 
-#if KLDEBUG_CONS_ENQUEUE
+#if ASDEBUG_CONS_ENQUEUE
     Pmsg5(50, "\t\t>>>> %4d as_consumer_enqueue_buffer() %d (%p), END   bigfile: %4X, cons.q.size: %d\n",
        my_thread_id(), buffer->id, buffer, HH(as_bigfile_bsock_proxy),
        qsize(&as_consumer_buffer_queue));
@@ -298,7 +300,7 @@ int AS_ENGINE::as_save_file_schedule(
    int digest_stream,
    bool has_file_data)
 {
-#if KLDEBUG
+#if ASDEBUG
    Pmsg2(50, "\t\t>>>> %4d as_save_file_schedule() file: %s\n", my_thread_id(), ff_pkt->fname);
 #endif
 
@@ -320,7 +322,7 @@ void *as_workqueue_engine(void *arg)
 {
    as_save_file_context_t *context = (as_save_file_context_t *)arg;
 
-#if KLDEBUG
+#if ASDEBUG
    Pmsg1(50, "\t\t>>>> %4d as_workqueue_engine()\n", my_thread_id());
 #endif
 
@@ -378,7 +380,7 @@ bool AS_ENGINE::as_is_consumer_queue_empty(bool lockme)
 
 void AS_ENGINE::as_release_buffer(as_buffer_t *buffer)
 {
-#if KLDEBUG
+#if ASDEBUG
    Pmsg4(50, "\t\t>>>> %4d as_release_buffer() BEGIN %d (%p), free size: %d \n",
 	  my_thread_id(), buffer->id, buffer, qsize(&as_free_buffer_queue));
 #endif
@@ -402,7 +404,7 @@ void AS_ENGINE::as_release_buffer(as_buffer_t *buffer)
 
    pthread_cond_broadcast(&as_buffer_cond);
 
-#if KLDEBUG
+#if ASDEBUG
    Pmsg4(50, "\t\t>>>> %4d as_release_buffer() END %d (%p), free size: %d \n",
       my_thread_id(), buffer->id, buffer, qsize(&as_free_buffer_queue));
 #endif
@@ -423,7 +425,7 @@ void AS_ENGINE::as_consumer_thread_loop(BSOCK *sd)
 {
    sd->clear_locking();
 
-#if KLDEBUG_LOOP
+#if ASDEBUG_LOOP
    Pmsg3(50, "\t\t>>>> %4d as_consumer_thread_loop() START, sock: %p, as_quit_consumer_thread_loop(): %d\n",
          my_thread_id(), sd, as_quit_consumer_thread_loop());
 #endif
@@ -443,13 +445,13 @@ void AS_ENGINE::as_consumer_thread_loop(BSOCK *sd)
    while ((as_quit_consumer_thread_loop() == false) ||
       (as_quit_consumer_thread_loop() &&
        (as_is_consumer_queue_empty(true) == false))) {
-#if KLDEBUG_LOOP
+#if ASDEBUG_LOOP
 	  Pmsg1(50, "\t\t>>>> %4d as_consumer_thread_loop() ITERATION BEGIN\n", my_thread_id());
 #endif
 
       P(as_consumer_queue_lock);
 
-#if KLDEBUG_LOOP
+#if ASDEBUG_LOOP
       Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() ITERATION BEGIN cons.q.size: %d\n", my_thread_id(), qsize(&as_consumer_buffer_queue));
 #endif
 
@@ -505,7 +507,7 @@ void AS_ENGINE::as_consumer_thread_loop(BSOCK *sd)
                   /* Dequeue this buffer */
                   buffer = (as_buffer_t *)qdchain(&buffer->bq);
 
-#if KLDEBUG_LOOP
+#if ASDEBUG_LOOP
          Pmsg7(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: %d fi: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
             my_thread_id(), buffer->id, buffer->file_idx, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
 #endif
@@ -521,7 +523,7 @@ void AS_ENGINE::as_consumer_thread_loop(BSOCK *sd)
                      /* Good to go */
                      buffer = (as_buffer_t *)qdchain(&buffer->bq);
 
-#if KLDEBUG_LOOP
+#if ASDEBUG_LOOP
             Pmsg7(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: %d fi: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
                my_thread_id(), buffer->id, buffer->file_idx, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
 #endif
@@ -552,7 +554,7 @@ void AS_ENGINE::as_consumer_thread_loop(BSOCK *sd)
                         }
                         /* Good to go */
                         buffer = (as_buffer_t *)qdchain(&buffer->bq);
-   #if KLDEBUG_LOOP
+   #if ASDEBUG_LOOP
             Pmsg7(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: %d fi: %d bufsize: %d parent: %4X (%p), cons.q.size: %d\n",
                my_thread_id(), buffer->id, buffer->file_idx, buffer->size, HH(buffer->parent), buffer->parent , qsize(&as_consumer_buffer_queue));
    #endif
@@ -565,7 +567,7 @@ void AS_ENGINE::as_consumer_thread_loop(BSOCK *sd)
             } /* buffer was null need to try again */
          }
 
-#if KLDEBUG_LOOP
+#if ASDEBUG_LOOP
          Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() DEQUEUE buf: WAIT, cons.q.size: %d\n", my_thread_id(), qsize(&as_consumer_buffer_queue));
 #endif
 
@@ -585,7 +587,7 @@ void AS_ENGINE::as_consumer_thread_loop(BSOCK *sd)
       }
       else
       {
-#if KLDEBUG_LOOP_DEQUEUE
+#if ASDEBUG_LOOP_DEQUEUE
          Pmsg8(50, "\t\t>>>> %4d as_consumer_thread_loop() DQ %d, FI: %d parent: %4X bigfile: %4X, final: %d cons.q.size: %d LAST_FI: %d\n",
             my_thread_id(), buffer->id, buffer->file_idx, HH(buffer->parent), HH(as_bigfile_bsock_proxy),
             buffer->final, qsize(&as_consumer_buffer_queue), as_last_file_idx);
@@ -599,7 +601,7 @@ void AS_ENGINE::as_consumer_thread_loop(BSOCK *sd)
       /* We've got a buffer, so now we need to send it via sd socket */
       int pos_in_buffer = 0;
 
-#if KLDEBUG_LOOP_SEND
+#if ASDEBUG_LOOP_SEND
       Pmsg8(50, "\t\t>>>> %4d as_consumer_thread_loop() START SENDING IN THIS ITER buf: %4d bufsize: %d parent: %4X (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
          my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent, to_send, pos_in_buffer, buffer->size);
 #endif
@@ -609,7 +611,7 @@ void AS_ENGINE::as_consumer_thread_loop(BSOCK *sd)
             memcpy(&to_send, &buffer->data[pos_in_buffer], sizeof(to_send));
             pos_in_buffer += sizeof(to_send);
 
-#if KLDEBUG_LOOP_SEND
+#if ASDEBUG_LOOP_SEND
             Pmsg8(50, "\t\t>>>> %4d GET_TO_SEND as_consumer_thread_loop() buf: %4d bufsize: %d parent: %4X (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
                my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent, to_send, pos_in_buffer, buffer->size);
 #endif
@@ -620,7 +622,7 @@ void AS_ENGINE::as_consumer_thread_loop(BSOCK *sd)
          /* Shouldn't happen */
          if (pos_in_buffer + to_send > buffer->size) {
 
-#if KLDEBUG_LOOP_SEND
+#if ASDEBUG_LOOP_SEND
             Pmsg8(50, "\t\t>>>> %4d SEND_LESS_B as_consumer_thread_loop() buf: %4d bufsize: %d parent: %4X (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
             		my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent, to_send, pos_in_buffer, buffer->size);
 #endif
@@ -630,7 +632,7 @@ void AS_ENGINE::as_consumer_thread_loop(BSOCK *sd)
 
             to_send -= (buffer->size - pos_in_buffer);
 
-#if KLDEBUG_LOOP_SEND
+#if ASDEBUG_LOOP_SEND
             Pmsg8(50, "\t\t>>>> %4d SEND_LESS_E as_consumer_thread_loop() buf: %4d bufsize: %d parent: %4X (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
                   my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent, to_send, pos_in_buffer, buffer->size);
 #endif
@@ -641,7 +643,7 @@ void AS_ENGINE::as_consumer_thread_loop(BSOCK *sd)
 
          if ((to_send < 0) && (to_send != NEED_TO_INIT)) {
             /* A signal */
-#if KLDEBUG_LOOP_SEND
+#if ASDEBUG_LOOP_SEND
             Pmsg8(50, "\t\t>>>> %4d SEND_SIGNAL as_consumer_thread_loop() buf: %4d bufsize: %d parent: %4X (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
                   my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent, to_send, pos_in_buffer, buffer->size);
 #endif
@@ -650,7 +652,7 @@ void AS_ENGINE::as_consumer_thread_loop(BSOCK *sd)
             to_send = NEED_TO_INIT;
          } else if (to_send > 0) {
             /* A normal message */
-#if KLDEBUG_LOOP_SEND
+#if ASDEBUG_LOOP_SEND
             Pmsg8(50, "\t\t>>>> %4d SEND_ENTIRE as_consumer_thread_loop() buf: %4d bufsize: %d parent: %4X (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
                   my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent, to_send, pos_in_buffer, buffer->size);
 #endif
@@ -666,7 +668,7 @@ void AS_ENGINE::as_consumer_thread_loop(BSOCK *sd)
          ASSERT(to_send != 0);
       }
 
-#if KLDEBUG_LOOP_SEND
+#if ASDEBUG_LOOP_SEND
       Pmsg8(50, "\t\t>>>> %4d END SENDING THIS ITER as_consumer_thread_loop() buf: %4d bufsize: %d parent: %4X (%p), tosend: %4d, pos: %4d, bufsize: %4d\n",
             my_thread_id(), buffer->id, buffer->size, HH(buffer->parent), buffer->parent, to_send, pos_in_buffer, buffer->size);
 #endif
@@ -674,12 +676,12 @@ void AS_ENGINE::as_consumer_thread_loop(BSOCK *sd)
       ASSERT(buffer);
       as_release_buffer(buffer);
 
-#if KLDEBUG_LOOP
+#if ASDEBUG_LOOP
       Pmsg1(50, "\t\t>>>> %4d as_consumer_thread_loop() ITERATION END\n", my_thread_id());
 #endif
    }
 
-#if KLDEBUG_LOOP
+#if ASDEBUG_LOOP
    Pmsg2(50, "\t\t>>>> %4d as_consumer_thread_loop() STOP, sock: %p\n", my_thread_id(), sd);
 #endif
 
@@ -699,7 +701,7 @@ void AS_ENGINE::as_init_free_buffers_queue()
    as_buffer_t *buffer = NULL;
    char *start = NULL;
 
-#if KLDEBUG
+#if ASDEBUG
    Pmsg2(50, "\t\t>>>> %4d as_init_free_buffers_queue() size: %d\n",
       my_thread_id(), AS_BUFFERS);
 #endif
@@ -738,7 +740,7 @@ void AS_ENGINE::as_init_consumer_thread(BSOCK *sd)
 
    pthread_create(&as_consumer_thread, NULL, as_consumer_thread_loop_wrapper, (void *)ctxt);
 
-#if KLDEBUG
+#if ASDEBUG
    Pmsg3(50, "\t\t>>>> %4d as_init_consumer_thread() id: %4d sock: %p\n",
       my_thread_id(), H(as_consumer_thread), sd);
 #endif
@@ -746,7 +748,7 @@ void AS_ENGINE::as_init_consumer_thread(BSOCK *sd)
 
 void AS_ENGINE::as_workqueue_init()
 {
-#if KLDEBUG
+#if ASDEBUG
    Pmsg1(50, "\t\t>>>> %4d as_workqueue_init()\n", my_thread_id());
 #endif
 
@@ -756,7 +758,7 @@ void AS_ENGINE::as_workqueue_init()
 
 void AS_ENGINE::as_init(BSOCK *sd, uint32_t buf_size)
 {
-#if KLDEBUG_INIT_SHUT
+#if ASDEBUG_INIT_SHUT
    Pmsg2(50, "\t\t>>>> %4d as_init() sock: %p\n", my_thread_id(), sd);
 #endif
 
@@ -778,7 +780,7 @@ uint32_t AS_ENGINE::as_get_initial_bsock_proxy_buf_size()
 
 void AS_ENGINE::as_request_consumer_thread_quit()
 {
-#if KLDEBUG
+#if ASDEBUG
    Pmsg1(50, "\t\t>>>> %4d as_request_consumer_thread_quit()\n", my_thread_id());
 #endif
 
@@ -791,7 +793,7 @@ void AS_ENGINE::as_join_consumer_thread()
 {
    pthread_cond_signal(&as_consumer_queue_cond);
 
-#if KLDEBUG
+#if ASDEBUG
    Pmsg1(50, "\t\t>>>> %4d as_join_consumer_thread()\n", my_thread_id());
 #endif
 
@@ -800,7 +802,7 @@ void AS_ENGINE::as_join_consumer_thread()
 
 void AS_ENGINE::as_dealloc_all_buffers()
 {
-#if KLDEBUG_DEALLOC_BUFFERS
+#if ASDEBUG_DEALLOC_BUFFERS
    Pmsg3(50, "\t\t>>>> %4d as_dealloc_all_buffers() BEGIN, free size %4d consumer size %4d\n",
       my_thread_id(), qsize(&as_free_buffer_queue), qsize(&as_consumer_buffer_queue));
 #endif
@@ -811,7 +813,7 @@ void AS_ENGINE::as_dealloc_all_buffers()
       buffer = (as_buffer_t *)qremove(&as_free_buffer_queue);
 
       if (buffer != NULL) {
-#if KLDEBUG_DEALLOC_BUFFERS
+#if ASDEBUG_DEALLOC_BUFFERS
          Pmsg3(50, "\t\t>>>> %4d as_dealloc_all_buffers() FREE buffer: %d (%p)\n",
     	      my_thread_id(), buffer->id, buffer);
 #endif
@@ -829,7 +831,7 @@ void AS_ENGINE::as_dealloc_all_buffers()
 
       if (buffer != NULL) {
 
-#if KLDEBUG_DEALLOC_BUFFERS
+#if ASDEBUG_DEALLOC_BUFFERS
          Pmsg3(50, "\t\t>>>> %4d as_dealloc_all_buffers() CONS buffer: %d (%p)\n",
    	      my_thread_id(), buffer->id, buffer);
 #endif
@@ -843,7 +845,7 @@ void AS_ENGINE::as_dealloc_all_buffers()
    } while (buffer != NULL);
 
    if (as_bigfile_buffer_only != NULL) {
-#if KLDEBUG_DEALLOC_BUFFERS
+#if ASDEBUG_DEALLOC_BUFFERS
       Pmsg3(50, "\t\t>>>> %4d as_dealloc_all_buffers() BIG buffer: %d (%p)\n",
          my_thread_id(), as_bigfile_buffer_only->id, as_bigfile_buffer_only);
 #endif
@@ -853,7 +855,7 @@ void AS_ENGINE::as_dealloc_all_buffers()
    }
 
    if (as_fix_fi_order_buffer != NULL) {
-#if KLDEBUG_DEALLOC_BUFFERS
+#if ASDEBUG_DEALLOC_BUFFERS
       Pmsg3(50, "\t\t>>>> %4d as_dealloc_all_buffers() FI FIX buffer: %d (%p)\n",
          my_thread_id(), as_fix_fi_order_buffer->id, as_bigfile_buffer_only);
 #endif
@@ -862,7 +864,7 @@ void AS_ENGINE::as_dealloc_all_buffers()
       as_fix_fi_order_buffer = NULL;
    }
 
-#if KLDEBUG_DEALLOC_BUFFERS
+#if ASDEBUG_DEALLOC_BUFFERS
    Pmsg3(50, "\t\t>>>> %4d as_dealloc_all_buffers() END, free size %4d consumer size %4d\n",
       my_thread_id(), qsize(&as_free_buffer_queue), qsize(&as_consumer_buffer_queue));
 #endif
@@ -873,7 +875,7 @@ void AS_ENGINE::as_dealloc_all_buffers()
 
 void AS_ENGINE::as_workqueue_destroy()
 {
-#if KLDEBUG
+#if ASDEBUG
    Pmsg1(50, "\t\t>>>> %4d as_workqueue_destroy()\n", my_thread_id());
 #endif
 
@@ -882,7 +884,7 @@ void AS_ENGINE::as_workqueue_destroy()
 
 void AS_ENGINE::as_shutdown(BSOCK *sd)
 {
-#if KLDEBUG_INIT_SHUT
+#if ASDEBUG_INIT_SHUT
    Pmsg1(50, "\t\t>>>> %4d as_shutdown() BEGIN\n", my_thread_id());
 #endif
 
@@ -900,7 +902,9 @@ void AS_ENGINE::as_shutdown(BSOCK *sd)
    as_consumer_thread_started = false;
    as_last_file_idx = 0;
 
-#if KLDEBUG_INIT_SHUT
+#if ASDEBUG_INIT_SHUT
    Pmsg1(50, "\t\t>>>> %4d as_shutdown() END\n", my_thread_id());
 #endif
 }
+
+#endif /* AS_BACKUP */

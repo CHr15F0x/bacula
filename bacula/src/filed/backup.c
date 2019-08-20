@@ -24,10 +24,10 @@
 #include "bacula.h"
 #include "filed.h"
 #include "ch.h"
-
 #if AS_BACKUP
 #include "as_bsock_proxy.h"
 #endif /* AS_BACKUP */
+
 
 #ifdef HAVE_DARWIN_OS
 const bool have_darwin_os = true;
@@ -72,9 +72,9 @@ static bool crypto_session_send(JCR *jcr, BSOCK *sd);
 
 static void close_vss_backup_session(JCR *jcr);
 
-#define KLDEBUG 0
-#define KLDEBUG_FI 0
-#define KLDEBUG_AS_SAVE_FILE 0
+#define ASDEBUG 0
+#define ASDEBUG_FI 0
+#define ASDEBUG_AS_SAVE_FILE 0
 
 /**
  * Find all the requested files and send them
@@ -96,7 +96,7 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
 
    sd = jcr->store_bsock;
 
-#if KLDEBUG
+#if ASDEBUG
    Pmsg4(50, "\t\t\t>>>> %4d blast_data_to_storage_daemon() sock: %p msg: %p msglen: %d\n",
       my_thread_id(), sd, sd->msg, sd->msglen);
 #endif
@@ -206,7 +206,7 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
       jcr->xattr_data->u.build->content = get_pool_memory(PM_MESSAGE);
    }
 
-#if KLDEBUG
+#if ASDEBUG
    Pmsg4(50, "\t\t\t>>>> %4d BEFORE as_init() sock: %p msg: %p msglen: %d\n",
       my_thread_id(), sd, sd->msg, sd->msglen);
 #endif
@@ -239,7 +239,7 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
    sd->clear_locking();
 #endif /* AS_BACKUP */
 
-#if KLDEBUG
+#if ASDEBUG
    Pmsg4(50, "\t\t\t>>>> %4d AFTER as_shutdown() sock: %p msg: %p msglen: %d\n",
       my_thread_id(), sd, sd->msg, sd->msglen);
 #endif
@@ -259,14 +259,14 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
 
    stop_heartbeat_monitor(jcr);
 
-#if KLDEBUG
+#if ASDEBUG
    Pmsg4(50, "\t\t\t>>>> %4d BEFORE last signal, sock: %p msg: %p msglen: %d\n",
       my_thread_id(), sd, sd->msg, sd->msglen);
 #endif
 
    sd->signal(BNET_EOD);            /* end of sending data */
 
-#if KLDEBUG
+#if ASDEBUG
    Pmsg4(50, "\t\t\t>>>> %4d AFTER last signal, sock: %p msg: %p msglen: %d\n",
       my_thread_id(), sd, sd->msg, sd->msglen);
 #endif
@@ -306,7 +306,7 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
 
    crypto_session_end(jcr);
 
-#if KLDEBUG
+#if ASDEBUG
    Pmsg5(50, "\t\t\t>>>> %4d end blast_data ok=%d ,sock: %p msg: %p msglen: %d\n",
       my_thread_id(), ok, sd, sd->msg, sd->msglen);
 #endif
@@ -400,6 +400,17 @@ static bool crypto_session_send(JCR *jcr, BSOCK *sd)
    return true;
 }
 
+#if !AS_BACKUP
+static int as_save_file(
+   JCR *jcr,
+   FF_PKT *ff_pkt,
+   bool do_plugin_set,
+   DIGEST *digest,
+   DIGEST *signing_digest,
+   int digest_stream,
+   bool has_file_data);
+#endif /* !AS_BACKUP */
+
 /**
  * Called here by find() for each file included.
  *   This is a callback. The original is find_files() above.
@@ -418,7 +429,7 @@ int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level)
    int digest_stream = STREAM_NONE;
    bool has_file_data = false;
 
-#if KLDEBUG
+#if ASDEBUG
    Pmsg2(50, "\t\t\t>>>> %4d save_file() file: %s\n", my_thread_id(), ff_pkt->fname);
 #endif
 
@@ -694,7 +705,7 @@ int as_save_file(
    int rtnstat = 0;
    int jcr_jobfiles = 0;
 
-#if KLDEBUG_AS_SAVE_FILE
+#if ASDEBUG_AS_SAVE_FILE
    Pmsg2(50, "\t\t\t>>>> %4d as_save_file() BEGIN file: %s\n", my_thread_id(), ff_pkt->fname);
    dump_consumer_queue_locked();
 #endif
@@ -1053,7 +1064,7 @@ bail_out:
       crypto_sign_free(sig);
    }
 
-#if KLDEBUG_AS_SAVE_FILE
+#if ASDEBUG_AS_SAVE_FILE
    Pmsg2(50, "\t\t\t>>>> %4d as_save_file() END   file: %s\n", my_thread_id(), ff_pkt->fname);
    dump_consumer_queue_locked();
 #endif
@@ -1086,7 +1097,9 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
 {
 #if !AS_BACKUP
    BSOCK *sd = jcr->store_bsock;
-#endif
+   int jcr_jobfiles = jcr->JobFiles;
+#endif /* !AS_BACKUP */
+
    uint64_t fileAddr = 0;             /* file address */
    char *rbuf, *wbuf;
    int32_t rsize = jcr->buf_size;      /* read buffer size */
@@ -1710,7 +1723,7 @@ static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &
     */
    sd->update_fi(jcr_jobfiles_snapshot);
 
-#if KLDEBUG_FI
+#if ASDEBUG_FI
    Pmsg1(50, ">>>> SEND FI: %d\n", jcr_jobfiles_snapshot);
 #endif
 

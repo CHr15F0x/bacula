@@ -225,8 +225,9 @@ typedef struct s_baculaInfo {
 
 /* Bacula Core Routines -- not used within a plugin */
 #ifdef FILE_DAEMON
-
+#if AS_BACKUP
 #include "as_bsock_proxy.h"
+#endif /* AS_BACKUP */
 
 struct BFILE;                   /* forward referenced */
 struct FF_PKT;

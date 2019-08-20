@@ -1,8 +1,6 @@
 #ifndef __AS_BSOCK_PROXY_H
 #define __AS_BSOCK_PROXY_H
 
-#define AS_BACKUP 1
-
 #include "as_backup.h"
 
 class AS_BSOCK_PROXY

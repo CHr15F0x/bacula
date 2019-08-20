@@ -1,8 +1,9 @@
 #include "bacula.h"
 #include "as_bsock_proxy.h"
 
-#define KLDEBUG 0
-#define KLDEBUG_FI 0
+#if AS_BACKUP
+#define ASDEBUG 0
+#define ASDEBUG_FI 0
 
 void AS_BSOCK_PROXY::init(AS_ENGINE *as_engine)
 {
@@ -13,14 +14,14 @@ void AS_BSOCK_PROXY::init(AS_ENGINE *as_engine)
    msg = get_pool_memory(PM_AS_BSOCK_PROXY);
    msg = realloc_pool_memory(msg, (int32_t)ase->as_get_initial_bsock_proxy_buf_size());
 
-#if KLDEBUG
+#if ASDEBUG
    Pmsg2(50, "\t\t>>>> %4d %4X AS_BSOCK_PROXY::init()\n", my_thread_id(), HH(this));
 #endif
 }
 
 bool AS_BSOCK_PROXY::send()
 {
-#if KLDEBUG
+#if ASDEBUG
    Pmsg7(50, "\t\t>>>> %4d %4X AS_BSOCK_PROXY::send() BEGIN buf: %d bufsize: %4d parent: %4X msglen: %4d msg: %4d\n",
       my_thread_id(),
       HH(this),
@@ -41,7 +42,7 @@ bool AS_BSOCK_PROXY::send()
       as_buf = ase->as_acquire_buffer(NULL, file_idx);
       as_buf->file_idx = file_idx;
 
-#if KLDEBUG
+#if ASDEBUG
       Pmsg7(50, "\t\t>>>> %4d %4X AS_BSOCK_PROXY::send() NULL BUF GET NEW buf: %d bufsize: %4d parent: %4X msglen: %4d msg: %4d\n",
          my_thread_id(),
          HH(this),
@@ -64,7 +65,7 @@ bool AS_BSOCK_PROXY::send()
       as_buf->parent = this;
       ase->as_consumer_enqueue_buffer(as_buf, false);
 
-#if KLDEBUG
+#if ASDEBUG
       Pmsg7(50, "\t\t>>>> %4d %4X AS_BSOCK_PROXY::send() WONT FIT GET NEW buf: %d bufsize: %4d parent: %4X msglen: %4d msg: %4d\n",
          my_thread_id(),
          HH(this),
@@ -88,7 +89,7 @@ bool AS_BSOCK_PROXY::send()
    ASSERT(as_buf != NULL);
    ASSERT(as_buf->size <= AS_BUFFER_CAPACITY - sizeof(msglen));
 
-#if KLDEBUG
+#if ASDEBUG
    Pmsg7(50, "\t\t>>>> %4d %4X AS_BSOCK_PROXY::send() PUT MSGLEN buf: %d bufsize: %4d parent: %4X msglen: %4d msg: %4d\n",
       my_thread_id(),
       HH(this),
@@ -141,7 +142,7 @@ bool AS_BSOCK_PROXY::send()
       as_buf = ase->as_acquire_buffer(this, file_idx);
       as_buf->file_idx = file_idx;
 
-#if KLDEBUG
+#if ASDEBUG
       Pmsg7(50, "\t\t>>>> %4d %4X AS_BSOCK_PROXY::send() FULL GET NEW buf: %d bufsize: %4d parent: %4X msglen: %4d msg: %4d\n",
          my_thread_id(),
          HH(this),
@@ -169,7 +170,7 @@ bool AS_BSOCK_PROXY::send()
       ASSERT(as_buf->size <= AS_BUFFER_CAPACITY);
    }
 
-#if KLDEBUG
+#if ASDEBUG
    Pmsg7(50, "\t\t>>>> %4d %4X AS_BSOCK_PROXY::send() END   buf: %d bufsize: %4d parent: %4X msglen: %4d msg: %4d\n",
       my_thread_id(),
       HH(this),
@@ -203,7 +204,7 @@ bool AS_BSOCK_PROXY::fsend(const char *fmt, ...)
    }
 
 
-#if KLDEBUG
+#if ASDEBUG
    Pmsg3(50, "\t\t>>>> %4d %4X AS_BSOCK_PROXY::fsend() \"%s\"\n", my_thread_id(), HH(this), msg);
 #endif
 
@@ -215,7 +216,7 @@ bool AS_BSOCK_PROXY::fsend(const char *fmt, ...)
  */
 bool AS_BSOCK_PROXY::signal(int signal)
 {
-#if KLDEBUG
+#if ASDEBUG
    Pmsg3(50, "\t\t>>>> %4d %4X AS_BSOCK_PROXY::signal() %d\n", my_thread_id(), HH(this), signal);
 #endif
 
@@ -229,13 +230,13 @@ bool AS_BSOCK_PROXY::signal(int signal)
 void AS_BSOCK_PROXY::finalize()
 {
    if (as_buf) {
-#if KLDEBUG
+#if ASDEBUG
       Pmsg3(50, "\t\t>>>> %4d %4X AS_BSOCK_PROXY::finalize() as_buf: %4d\n", my_thread_id(), HH(this), as_buf->id);
 #endif
       ase->as_consumer_enqueue_buffer(as_buf, true);
       as_buf = NULL;
    } else {
-#if KLDEBUG
+#if ASDEBUG
       Pmsg2(50, "\t\t>>>> %4d %4X AS_BSOCK_PROXY::finalize() null\n", my_thread_id(), HH(this));
 #endif
    }
@@ -248,7 +249,7 @@ void AS_BSOCK_PROXY::update_fi(int fi)
 
 void AS_BSOCK_PROXY::cleanup()
 {
-#if KLDEBUG
+#if ASDEBUG
    Pmsg4(50, "\t\t>>>> %4d %4X AS_BSOCK_PROXY::cleanup() msglen: %4d, msg: %4d\n", my_thread_id(), HH(this), msglen, H(msg));
 #endif
 
@@ -272,3 +273,5 @@ const char *AS_BSOCK_PROXY::bstrerror()
 {
    return "";
 }
+
+#endif /* AS_BACKUP */

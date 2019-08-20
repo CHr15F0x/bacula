@@ -1,4 +1,4 @@
-export CFLAGS="-O0 -g"
+export CFLAGS="-O0 -g -DAS_BACKUP=1"
 export REGRESS_DEBUG=1
 
 # Set this to the make option (usually -j3 or higher)
