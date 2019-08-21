@@ -58,7 +58,8 @@ FileSet {
   Name = "Full Set"
   Enable VSS = yes
   Include { Options { signature=MD5; portable=no  
-      compression=GZIP }
+      #compression=GZIP
+       }
     File =  "@win32_file@"
   }
 }

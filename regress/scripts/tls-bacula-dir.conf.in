@@ -205,7 +205,7 @@ FileSet {
   Include {
     Options {
       signature=MD5 
-      compression=GZIP 
+      #compression=GZIP 
     }
     File = <@tmpdir@/file-list
   }
@@ -228,7 +228,7 @@ FileSet {
   Include {
     Options {
       signature=MD5 
-      compression=GZIP
+      #compression=GZIP
       sparse=yes
     }
     File = <@tmpdir@/file-list

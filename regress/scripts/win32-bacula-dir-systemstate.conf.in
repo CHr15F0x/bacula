@@ -86,7 +86,7 @@ FileSet {
   Include { 
      Options { 
         signature=MD5; portable=no  
-#      compression=GZIP
+#      #compression=GZIP
      }
      File = "@win32_file@"
      Plugin = "vss:/@SYSTEMSTATE/"
@@ -100,7 +100,7 @@ FileSet {
   Include { 
      Options { 
         signature=MD5; portable=no  
-#      compression=GZIP
+#      #compression=GZIP
      }
      File = "@win32_file@"
      Plugin = "vss:/@MSSQL/"

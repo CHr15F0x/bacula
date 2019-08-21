@@ -207,7 +207,9 @@ FileSet {
 FileSet {
   Name = "CompressedSet"
   Include {
-    Options { signature=MD5; compression=GZIP }
+    Options { signature=MD5; 
+    #compression=GZIP
+     }
     File =<@tmpdir@/file-list
   }
 }
@@ -216,7 +218,8 @@ FileSet {
   Name = "SparseCompressedSet"
   Include {
     Options {
-      signature=MD5; compression=GZIP
+      signature=MD5;
+       #compression=GZIP
     }
     File= <@tmpdir@/file-list
   }

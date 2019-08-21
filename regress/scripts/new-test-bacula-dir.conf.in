@@ -261,7 +261,7 @@ FileSet {
   Include {
     Options {
       signature=MD5 
-      compression=GZIP 
+      #compression=GZIP 
     }
     File = <@tmpdir@/file-list
   }
@@ -272,7 +272,7 @@ FileSet {
   Include {
     Options {
       signature=MD5
-      compression=LZO
+      #compression=LZO
     }
     File = <@tmpdir@/file-list
   }
@@ -295,7 +295,7 @@ FileSet {
   Include {
     Options {
       signature=MD5 
-      compression=GZIP
+      #compression=GZIP
       sparse=yes
     }
     File = <@tmpdir@/file-list
@@ -307,7 +307,7 @@ FileSet {
   Include {
     Options {
       signature=MD5
-      compression=LZO
+      #compression=LZO
       sparse=yes
     }
     File = <@tmpdir@/file-list
