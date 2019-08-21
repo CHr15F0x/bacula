@@ -24,7 +24,10 @@
 #include "bacula.h"
 #include "filed.h"
 #include "ch.h"
+#if AS_BACKUP
 #include "as_bsock_proxy.h"
+#endif /* AS_BACKUP */
+
 
 #ifdef HAVE_DARWIN_OS
 const bool have_darwin_os = true;
@@ -141,66 +144,36 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
     */
 #ifdef HAVE_LZO
    jcr->compress_buf_size = MAX(jcr->buf_size + (jcr->buf_size / 16) + 67 + (int)sizeof(comp_stream_header), jcr->buf_size + ((jcr->buf_size+999) / 1000) + 30);
-#ifndef AS_BACKUP
    jcr->compress_buf = get_memory(jcr->compress_buf_size);
-#endif /* !AS_BACKUP */
 #else
    jcr->compress_buf_size = jcr->buf_size + ((jcr->buf_size+999) / 1000) + 30;
-#ifndef AS_BACKUP
    jcr->compress_buf = get_memory(jcr->compress_buf_size);
-#endif /* !AS_BACKUP */
 #endif
 
-#if AS_BACKUP
-   AS_ENGINE ase;
-   ase.init();
-
-   for (int i = 0; i < AS_PRODUCER_THREADS; ++i) {
-      ase.compress_buf[i] = get_memory(jcr->compress_buf_size);
-   }
-#endif /* AS_BACKUP */
-
 #ifdef HAVE_LIBZ
-#if AS_BACKUP
-   for (int i = 0; i < AS_PRODUCER_THREADS; ++i) {
-#endif /* AS_BACKUP */
-      z_stream *pZlibStream = (z_stream*)malloc(sizeof(z_stream));
-      if (pZlibStream) {
-         pZlibStream->zalloc = Z_NULL;
-         pZlibStream->zfree = Z_NULL;
-         pZlibStream->opaque = Z_NULL;
-         pZlibStream->state = Z_NULL;
+   z_stream *pZlibStream = (z_stream*)malloc(sizeof(z_stream));
+   if (pZlibStream) {
+      pZlibStream->zalloc = Z_NULL;
+      pZlibStream->zfree = Z_NULL;
+      pZlibStream->opaque = Z_NULL;
+      pZlibStream->state = Z_NULL;
 
-         if (deflateInit(pZlibStream, Z_DEFAULT_COMPRESSION) == Z_OK) {
-#if AS_BACKUP
-            ase.pZLIB_compress_workset[i] = pZlibStream;
-#else /* !AS_BACKUP */
-            jcr->pZLIB_compress_workset = pZlibStream;
-#endif /* !AS_BACKUP */
-         } else {
-            free (pZlibStream);
-         }
+      if (deflateInit(pZlibStream, Z_DEFAULT_COMPRESSION) == Z_OK) {
+         jcr->pZLIB_compress_workset = pZlibStream;
+      } else {
+         free (pZlibStream);
       }
-#if AS_BACKUP
    }
-#endif /* AS_BACKUP */
 #endif
 
 #ifdef HAVE_LZO
-   if (lzo_init() == LZO_E_OK) {
-#if AS_BACKUP
-      for (int i = 0; i < AS_PRODUCER_THREADS; ++i) {
-         lzo_voidp pLzoMem = (lzo_voidp) malloc(LZO1X_1_MEM_COMPRESS);
-         if (pLzoMem) {
-            ase.LZO_compress_workset[i] = pLzoMem;
-         }
-      }
-#else /* !AS_BACKUP */
-      lzo_voidp pLzoMem = (lzo_voidp) malloc(LZO1X_1_MEM_COMPRESS);
-      if (pLzoMem) {
+   lzo_voidp pLzoMem = (lzo_voidp) malloc(LZO1X_1_MEM_COMPRESS);
+   if (pLzoMem) {
+      if (lzo_init() == LZO_E_OK) {
          jcr->LZO_compress_workset = pLzoMem;
+      } else {
+         free (pLzoMem);
       }
-#endif /* !AS_BACKUP */
    }
 #endif
 
@@ -240,6 +213,9 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
 
 #if AS_BACKUP
    sd->set_locking();
+
+   AS_ENGINE ase;
+   ase.init();
 
    jcr->ase = &ase;
 
@@ -424,7 +400,7 @@ static bool crypto_session_send(JCR *jcr, BSOCK *sd)
    return true;
 }
 
-#ifndef AS_BACKUP
+#if !AS_BACKUP
 static int as_save_file(
    JCR *jcr,
    FF_PKT *ff_pkt,
@@ -1119,7 +1095,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
 #endif
 )
 {
-#if !defined(AS_BACKUP)
+#if !AS_BACKUP
    BSOCK *sd = jcr->store_bsock;
    int jcr_jobfiles = jcr->JobFiles;
 #endif /* !AS_BACKUP */
