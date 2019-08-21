@@ -144,13 +144,15 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
     */
 #ifdef HAVE_LZO
    jcr->compress_buf_size = MAX(jcr->buf_size + (jcr->buf_size / 16) + 67 + (int)sizeof(comp_stream_header), jcr->buf_size + ((jcr->buf_size+999) / 1000) + 30);
-   jcr->compress_buf = get_memory(jcr->compress_buf_size);
 #else
    jcr->compress_buf_size = jcr->buf_size + ((jcr->buf_size+999) / 1000) + 30;
-   jcr->compress_buf = get_memory(jcr->compress_buf_size);
 #endif
 
-#ifdef HAVE_LIBZ
+#ifndef AS_BACKUP
+   jcr->compress_buf = get_memory(jcr->compress_buf_size);
+#endif /* !AS_BACKUP */
+
+#if defined(HAVE_LIBZ) && !defined(AS_BACKUP)
    z_stream *pZlibStream = (z_stream*)malloc(sizeof(z_stream));
    if (pZlibStream) {
       pZlibStream->zalloc = Z_NULL;
@@ -166,7 +168,7 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
    }
 #endif
 
-#ifdef HAVE_LZO
+#if defined(HAVE_LZO) && !defined(AS_BACKUP)
    lzo_voidp pLzoMem = (lzo_voidp) malloc(LZO1X_1_MEM_COMPRESS);
    if (pLzoMem) {
       if (lzo_init() == LZO_E_OK) {
@@ -215,7 +217,7 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
    sd->set_locking();
 
    AS_ENGINE ase;
-   ase.init();
+   ase.init(jcr->compress_buf_size);
 
    jcr->ase = &ase;
 
@@ -400,7 +402,7 @@ static bool crypto_session_send(JCR *jcr, BSOCK *sd)
    return true;
 }
 
-#if !AS_BACKUP
+#ifndef AS_BACKUP
 static int as_save_file(
    JCR *jcr,
    FF_PKT *ff_pkt,
@@ -1095,14 +1097,13 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
 #endif
 )
 {
-#if !AS_BACKUP
+#ifndef AS_BACKUP
    BSOCK *sd = jcr->store_bsock;
    int jcr_jobfiles = jcr->JobFiles;
 #endif /* !AS_BACKUP */
-
    uint64_t fileAddr = 0;             /* file address */
    char *rbuf, *wbuf;
-   int32_t rsize = jcr->buf_size;      /* read buffer size */
+   int32_t rsize = jcr->buf_size;     /* read buffer size */
    POOLMEM *msgsave;
    CIPHER_CONTEXT *cipher_ctx = NULL; /* Quell bogus uninitialized warnings */
    const uint8_t *cipher_input;
@@ -1124,20 +1125,33 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
    uLong compress_len = 0;
    uLong max_compress_len = 0;
    const Bytef *cbuf = NULL;
+#if AS_BACKUP
+   int idx = ase->get_comp_idx();
+   ASSERT(idx >= 0);
+   ASSERT(idx < AS_PRODUCER_THREADS);
+   POOLMEM *compress_buf = ase->compress_buf[idx];
+   void *pZLIB_compress_workset = ase->pZLIB_compress_workset[idx];
+   void *LZO_compress_workset = ase->LZO_compress_workset[idx];
+#else /* !AS_BACKUP */
+   POOLMEM *compress_buf = jcr->compress_buf;
+   void *pZLIB_compress_workset = jcr->pZLIB_compress_workset;
+   void *LZO_compress_workset = jcr->LZO_compress_workset;
+#endif /* !AS_BACKUP */
+
  #ifdef HAVE_LIBZ
    int zstat;
 
    if ((ff_pkt->flags & FO_COMPRESS) && ff_pkt->Compress_algo == COMPRESS_GZIP) {
       if ((ff_pkt->flags & FO_SPARSE) || (ff_pkt->flags & FO_OFFSETS)) {
-         cbuf = (Bytef *)jcr->compress_buf + OFFSET_FADDR_SIZE;
+         cbuf = (Bytef *)compress_buf + OFFSET_FADDR_SIZE;
          max_compress_len = jcr->compress_buf_size - OFFSET_FADDR_SIZE;
       } else {
-         cbuf = (Bytef *)jcr->compress_buf;
+         cbuf = (Bytef *)compress_buf;
          max_compress_len = jcr->compress_buf_size; /* set max length */
       }
 
-      wbuf = jcr->compress_buf;    /* compressed output here */
-      cipher_input = (uint8_t *)jcr->compress_buf; /* encrypt compressed data */
+      wbuf = compress_buf;    /* compressed output here */
+      cipher_input = (uint8_t *)compress_buf; /* encrypt compressed data */
 
       /**
        * Only change zlib parameters if there is no pending operation.
@@ -1145,9 +1159,9 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
        * deflate.
        */
 
-      if (((z_stream*)jcr->pZLIB_compress_workset)->total_in == 0) {
+      if (((z_stream*)pZLIB_compress_workset)->total_in == 0) {
          /** set gzip compression level - must be done per file */
-         if ((zstat=deflateParams((z_stream*)jcr->pZLIB_compress_workset,
+         if ((zstat=deflateParams((z_stream*)pZLIB_compress_workset,
               ff_pkt->Compress_level, Z_DEFAULT_STRATEGY)) != Z_OK) {
             Jmsg(jcr, M_FATAL, 0, _("Compression deflateParams error: %d\n"), zstat);
             jcr->setJobStatus(JS_ErrorTerminated);
@@ -1166,18 +1180,18 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
 
    if ((ff_pkt->flags & FO_COMPRESS) && ff_pkt->Compress_algo == COMPRESS_LZO1X) {
       if ((ff_pkt->flags & FO_SPARSE) || (ff_pkt->flags & FO_OFFSETS)) {
-         cbuf = (Bytef *)jcr->compress_buf + OFFSET_FADDR_SIZE;
-         cbuf2 = (Bytef *)jcr->compress_buf + OFFSET_FADDR_SIZE + sizeof(comp_stream_header);
+         cbuf = (Bytef *)compress_buf + OFFSET_FADDR_SIZE;
+         cbuf2 = (Bytef *)compress_buf + OFFSET_FADDR_SIZE + sizeof(comp_stream_header);
          max_compress_len = jcr->compress_buf_size - OFFSET_FADDR_SIZE;
       } else {
-         cbuf = (Bytef *)jcr->compress_buf;
-         cbuf2 = (Bytef *)jcr->compress_buf + sizeof(comp_stream_header);
+         cbuf = (Bytef *)compress_buf;
+         cbuf2 = (Bytef *)compress_buf + sizeof(comp_stream_header);
          max_compress_len = jcr->compress_buf_size; /* set max length */
       }
       ch.magic = COMPRESS_LZO1X;
       ch.version = COMP_HEAD_VERSION;
-      wbuf = jcr->compress_buf;    /* compressed output here */
-      cipher_input = (uint8_t *)jcr->compress_buf; /* encrypt compressed data */
+      wbuf = compress_buf;    /* compressed output here */
+      cipher_input = (uint8_t *)compress_buf; /* encrypt compressed data */
    }
  #endif
 #else
@@ -1300,22 +1314,22 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
 
 #ifdef HAVE_LIBZ
       /** Do compression if turned on */
-      if (ff_pkt->flags & FO_COMPRESS && ff_pkt->Compress_algo == COMPRESS_GZIP && jcr->pZLIB_compress_workset) {
+      if (ff_pkt->flags & FO_COMPRESS && ff_pkt->Compress_algo == COMPRESS_GZIP && pZLIB_compress_workset) {
          Dmsg3(400, "cbuf=0x%x rbuf=0x%x len=%u\n", cbuf, rbuf, sd->msglen);
 
-         ((z_stream*)jcr->pZLIB_compress_workset)->next_in   = (Bytef *)rbuf;
-                ((z_stream*)jcr->pZLIB_compress_workset)->avail_in  = sd->msglen;
-         ((z_stream*)jcr->pZLIB_compress_workset)->next_out  = (Bytef *)cbuf;
-                ((z_stream*)jcr->pZLIB_compress_workset)->avail_out = max_compress_len;
+         ((z_stream*)pZLIB_compress_workset)->next_in   = (Bytef *)rbuf;
+                ((z_stream*)pZLIB_compress_workset)->avail_in  = sd->msglen;
+         ((z_stream*)pZLIB_compress_workset)->next_out  = (Bytef *)cbuf;
+                ((z_stream*)pZLIB_compress_workset)->avail_out = max_compress_len;
 
-         if ((zstat=deflate((z_stream*)jcr->pZLIB_compress_workset, Z_FINISH)) != Z_STREAM_END) {
+         if ((zstat=deflate((z_stream*)pZLIB_compress_workset, Z_FINISH)) != Z_STREAM_END) {
             Jmsg(jcr, M_FATAL, 0, _("Compression deflate error: %d\n"), zstat);
             jcr->setJobStatus(JS_ErrorTerminated);
             goto err;
          }
-         compress_len = ((z_stream*)jcr->pZLIB_compress_workset)->total_out;
+         compress_len = ((z_stream*)pZLIB_compress_workset)->total_out;
          /** reset zlib stream to be able to begin from scratch again */
-         if ((zstat=deflateReset((z_stream*)jcr->pZLIB_compress_workset)) != Z_OK) {
+         if ((zstat=deflateReset((z_stream*)pZLIB_compress_workset)) != Z_OK) {
             Jmsg(jcr, M_FATAL, 0, _("Compression deflateReset error: %d\n"), zstat);
             jcr->setJobStatus(JS_ErrorTerminated);
             goto err;
@@ -1330,7 +1344,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
 #endif
 #ifdef HAVE_LZO
       /** Do compression if turned on */
-      if (ff_pkt->flags & FO_COMPRESS && ff_pkt->Compress_algo == COMPRESS_LZO1X && jcr->LZO_compress_workset) {
+      if (ff_pkt->flags & FO_COMPRESS && ff_pkt->Compress_algo == COMPRESS_LZO1X && LZO_compress_workset) {
          lzo_uint len;          /* TODO: See with the latest patch how to handle lzo_uint with 64bit */
 
          ser_declare;
@@ -1339,7 +1353,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
          Dmsg3(400, "cbuf=0x%x rbuf=0x%x len=%u\n", cbuf, rbuf, sd->msglen);
 
          lzores = lzo1x_1_compress((const unsigned char*)rbuf, sd->msglen, cbuf2,
-                                   &len, jcr->LZO_compress_workset);
+                                   &len, LZO_compress_workset);
          compress_len = len;
          if (lzores == LZO_E_OK && compress_len <= max_compress_len) {
             /* complete header */
@@ -1494,9 +1508,16 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
       crypto_cipher_free(cipher_ctx);
    }
 
+#if (defined(HAVE_LIBZ) || defined(HAVE_LZO)) && defined(AS_BACKUP)
+   ase->free_comp_idx(idx);
+#endif
    return 1;
 
 err:
+#if (defined(HAVE_LIBZ) || defined(HAVE_LZO)) && defined(AS_BACKUP)
+   ase->free_comp_idx(idx);
+#endif
+
    /** Free the cipher context */
    if (cipher_ctx) {
       crypto_cipher_free(cipher_ctx);

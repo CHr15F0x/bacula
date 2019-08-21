@@ -91,7 +91,7 @@ private:
 
 public:
 
-   void init();
+   void init(int32_t compress_buf_size);
    void cleanup();
    void destroy();
 

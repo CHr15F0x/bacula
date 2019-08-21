@@ -24,7 +24,7 @@ int my_thread_id()
    return H(pthread_self());
 }
 
-void AS_ENGINE::init()
+void AS_ENGINE::init(int32_t compress_buf_size)
 {
    memset(this, 0, sizeof(AS_ENGINE));
 
@@ -40,6 +40,41 @@ void AS_ENGINE::init()
    pthread_cond_init(&as_consumer_queue_cond, NULL);
    as_consumer_buffer_queue.qnext = &as_consumer_buffer_queue;
    as_consumer_buffer_queue.qprev = &as_consumer_buffer_queue;
+
+#if defined(HAVE_LZO) || defined(HAVE_LIBZ)
+   for (int i = 0; i < AS_PRODUCER_THREADS; ++i) {
+      compress_buf[i] = get_memory(compress_buf_size);
+   }
+#endif /* defined(HAVE_LZO) || defined(HAVE_LIBZ) */
+
+#ifdef HAVE_LZO
+   if (lzo_init() == LZO_E_OK) {
+      for (int i = 0; i < AS_PRODUCER_THREADS; ++i) {
+         lzo_voidp pLzoMem = (lzo_voidp) malloc(LZO1X_1_MEM_COMPRESS);
+         if (pLzoMem) {
+            LZO_compress_workset[i] = pLzoMem;
+         }
+      }
+   }
+#endif /* HAVE_LZO */
+
+#ifdef HAVE_LIBZ
+   for (int i = 0; i < AS_PRODUCER_THREADS; ++i) {
+      z_stream *pZlibStream = (z_stream*)malloc(sizeof(z_stream));
+      if (pZlibStream) {
+         pZlibStream->zalloc = Z_NULL;
+         pZlibStream->zfree = Z_NULL;
+         pZlibStream->opaque = Z_NULL;
+         pZlibStream->state = Z_NULL;
+
+         if (deflateInit(pZlibStream, Z_DEFAULT_COMPRESSION) == Z_OK) {
+            pZLIB_compress_workset[i] = pZlibStream;
+         } else {
+            free (pZlibStream);
+         }
+      }
+   }
+#endif /* HAVE_LIBZ */
 }
 
 void AS_ENGINE::cleanup()
@@ -52,6 +87,27 @@ void AS_ENGINE::cleanup()
    pthread_cond_destroy(&as_consumer_thread_started_cond);
    pthread_mutex_destroy(&as_consumer_queue_lock);
    pthread_cond_destroy(&as_consumer_queue_cond);
+
+#if defined(HAVE_LZO) || defined(HAVE_LIBZ)
+   for (int i = 0; i < AS_PRODUCER_THREADS; ++i) {
+      if (compress_buf) {
+         free_pool_memory(compress_buf);
+      }
+   }
+#endif /* defined(HAVE_LZO) || defined(HAVE_LIBZ) */
+
+#ifdef HAVE_LZO
+   if (LZO_compress_workset) {
+      free (LZO_compress_workset);
+   }
+#endif /* HAVE_LZO */
+
+#ifdef HAVE_LIBZ
+   if (pZLIB_compress_workset) {
+      deflateEnd((z_stream *)pZLIB_compress_workset);
+      free (pZLIB_compress_workset);
+   }
+#endif /* HAVE_LIBZ */
 
    memset(this, 0, sizeof(AS_ENGINE));
 }
