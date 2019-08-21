@@ -990,9 +990,9 @@ void AS_ENGINE::as_shutdown(BSOCK *sd)
 
 int AS_ENGINE::get_comp_idx()
 {
-   Pmsg1(50, ">>>> get_comp_idx  comp_usage: %02X\n", comp_usage);
+//   Pmsg1(50, ">>>> get_comp_idx  comp_usage: %02X\n", comp_usage);
 
-//   P(comp_usage_lock);
+   P(comp_usage_lock);
    for (int i = 0; i < AS_PRODUCER_THREADS; ++i) {
       if ((comp_usage & (1u << i)) == 0) {
          comp_usage |= (1u << i);
@@ -1001,19 +1001,19 @@ int AS_ENGINE::get_comp_idx()
       }
    }
 
-//   V(comp_usage_lock);
+   V(comp_usage_lock);
    return -1;
 }
 
 void AS_ENGINE::free_comp_idx(int idx)
 {
-//   P(comp_usage_lock);
-   Pmsg1(50, ">>>> free_comp_idx comp_usage: %02X\n", comp_usage);
+   P(comp_usage_lock);
+//   Pmsg1(50, ">>>> free_comp_idx comp_usage: %02X\n", comp_usage);
 
    if ((idx >= 0) && (idx < AS_PRODUCER_THREADS)) {
       comp_usage &= ~(1u << idx);
    }
-//   V(comp_usage_lock);
+   V(comp_usage_lock);
 }
 
 void AS_ENGINE::update_crypto_bufs(int32_t size)
