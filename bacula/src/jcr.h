@@ -420,7 +420,7 @@ public:
    bool multi_restore;                /* Dir can do multiple storage restore */
    htable *file_list;                 /* Previous file list (accurate mode) */
    uint64_t base_size;                /* compute space saved with base job */
-#if AS_BACKUP
+#ifdef AS_BACKUP
    AS_ENGINE *ase;
 #endif /* AS_BACKUP */
 #endif /* FILE_DAEMON */
@@ -543,7 +543,7 @@ extern void free_jcr(JCR *jcr);
 typedef void (dbg_jcr_hook_t)(JCR *jcr, FILE *fp);
 extern void dbg_jcr_add_hook(dbg_jcr_hook_t *fct);
 
-#if AS_BACKUP
+#ifdef AS_BACKUP
 #define JCR_P jcr->lock();
 #define JCR_V jcr->unlock();
 #define JCR_SCOPED_LOCK JCR_LOCK_GUARD jcrl(jcr);
@@ -565,7 +565,7 @@ private:
 
    JCR *jcr;
 };
-#else /* AS_BACKUP */
+#else /* !AS_BACKUP */
 #define JCR_P
 #define JCR_V
 #define JCR_SCOPED_LOCK

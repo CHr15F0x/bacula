@@ -4,7 +4,16 @@
 #include "../findlib/find.h"
 #include "as_bsock_proxy.h"
 
-#if AS_BACKUP
+#ifdef HAVE_LIBZ
+#include <zlib.h>
+#endif /* HAVE_LIBZ */
+
+#ifdef HAVE_LZO
+#include <lzo/lzoconf.h>
+#include <lzo/lzo1x.h>
+#endif /* HAVE_LZO */
+
+#ifdef AS_BACKUP
 
 #define ASDEBUG 0
 #define ASDEBUG_LOOP 0
@@ -75,6 +84,12 @@ void AS_ENGINE::init(int32_t compress_buf_size)
       }
    }
 #endif /* HAVE_LIBZ */
+
+   for (int i = 0; i < AS_PRODUCER_THREADS; ++i) {
+      crypto_buf[i] = get_memory(CRYPTO_CIPHER_MAX_BLOCK_SIZE);
+   }
+
+   pthread_mutex_init(&comp_usage_lock, NULL);
 }
 
 void AS_ENGINE::cleanup()
@@ -90,24 +105,34 @@ void AS_ENGINE::cleanup()
 
 #if defined(HAVE_LZO) || defined(HAVE_LIBZ)
    for (int i = 0; i < AS_PRODUCER_THREADS; ++i) {
-      if (compress_buf) {
-         free_pool_memory(compress_buf);
+      if (compress_buf[i]) {
+         free_pool_memory(compress_buf[i]);
       }
    }
 #endif /* defined(HAVE_LZO) || defined(HAVE_LIBZ) */
 
 #ifdef HAVE_LZO
-   if (LZO_compress_workset) {
-      free (LZO_compress_workset);
+   for (int i = 0; i < AS_PRODUCER_THREADS; ++i) {
+      if (LZO_compress_workset[i]) {
+         free(LZO_compress_workset[i]);
+      }
    }
 #endif /* HAVE_LZO */
 
 #ifdef HAVE_LIBZ
-   if (pZLIB_compress_workset) {
-      deflateEnd((z_stream *)pZLIB_compress_workset);
-      free (pZLIB_compress_workset);
+   for (int i = 0; i < AS_PRODUCER_THREADS; ++i) {
+      if (pZLIB_compress_workset[i]) {
+         deflateEnd((z_stream *)pZLIB_compress_workset[i]);
+         free (pZLIB_compress_workset[i]);
+      }
    }
 #endif /* HAVE_LIBZ */
+
+   for (int i = 0; i < AS_PRODUCER_THREADS; ++i) {
+	   free_pool_memory(crypto_buf[i]);
+   }
+
+   pthread_mutex_destroy(&comp_usage_lock);
 
    memset(this, 0, sizeof(AS_ENGINE));
 }
@@ -965,20 +990,36 @@ void AS_ENGINE::as_shutdown(BSOCK *sd)
 
 int AS_ENGINE::get_comp_idx()
 {
+   Pmsg1(50, ">>>> get_comp_idx  comp_usage: %02X\n", comp_usage);
+
+//   P(comp_usage_lock);
    for (int i = 0; i < AS_PRODUCER_THREADS; ++i) {
-      if (comp_usage & 1u) {
+      if ((comp_usage & (1u << i)) == 0) {
          comp_usage |= (1u << i);
+         V(comp_usage_lock);
          return i;
       }
    }
 
+//   V(comp_usage_lock);
    return -1;
 }
 
 void AS_ENGINE::free_comp_idx(int idx)
 {
+//   P(comp_usage_lock);
+   Pmsg1(50, ">>>> free_comp_idx comp_usage: %02X\n", comp_usage);
+
    if ((idx >= 0) && (idx < AS_PRODUCER_THREADS)) {
       comp_usage &= ~(1u << idx);
+   }
+//   V(comp_usage_lock);
+}
+
+void AS_ENGINE::update_crypto_bufs(int32_t size)
+{
+   for (int i = 0; i < AS_PRODUCER_THREADS; ++i) {
+      crypto_buf[i] = check_pool_memory_size(crypto_buf[i], size);
    }
 }
 

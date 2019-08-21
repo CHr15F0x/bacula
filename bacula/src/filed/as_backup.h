@@ -88,6 +88,7 @@ private:
    int as_last_file_idx;
 
    uint32_t comp_usage;
+   pthread_mutex_t comp_usage_lock;
 
 public:
 
@@ -145,9 +146,12 @@ public:
    POOLMEM *compress_buf       [AS_PRODUCER_THREADS];
    void *pZLIB_compress_workset[AS_PRODUCER_THREADS];
    void *LZO_compress_workset  [AS_PRODUCER_THREADS];
+   POOLMEM *crypto_buf         [AS_PRODUCER_THREADS];
 
    int get_comp_idx();
    void free_comp_idx(int idx);
+
+   void update_crypto_bufs(int32_t size);
 };
 
 /**

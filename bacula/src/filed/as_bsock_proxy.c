@@ -1,7 +1,7 @@
 #include "bacula.h"
 #include "as_bsock_proxy.h"
 
-#if AS_BACKUP
+#ifdef AS_BACKUP
 #define ASDEBUG 0
 #define ASDEBUG_FI 0
 

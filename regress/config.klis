@@ -1,6 +1,5 @@
 CFLAGS="-O0 -g"
 
-
 # Set this to the make option (usually -j3 or higher)
 MAKEOPT=-j 4
 

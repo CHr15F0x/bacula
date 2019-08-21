@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-export CFLAGS="-g -O0 -DAS_BACKUP=1"
+export CFLAGS="-g -O0 -DAS_BACKUP"
 export EPREFIX=${PWD}/../install
 export PREFIX=${EPREFIX}
 export DATAROOTDIR=${EPREFIX}/dataroot

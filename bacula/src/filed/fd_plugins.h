@@ -225,7 +225,7 @@ typedef struct s_baculaInfo {
 
 /* Bacula Core Routines -- not used within a plugin */
 #ifdef FILE_DAEMON
-#if AS_BACKUP
+#ifdef AS_BACKUP
 #include "as_bsock_proxy.h"
 #endif /* AS_BACKUP */
 
@@ -235,7 +235,7 @@ void load_fd_plugins(const char *plugin_dir);
 void new_plugins(JCR *jcr);
 void free_plugins(JCR *jcr);
 void generate_plugin_event(JCR *jcr, bEventType event, void *value=NULL);
-#if AS_BACKUP
+#ifdef AS_BACKUP
 bool send_plugin_name(JCR *jcr, AS_BSOCK_PROXY *sd, bool start);
 #else
 bool send_plugin_name(JCR *jcr, BSOCK *sd, bool start);

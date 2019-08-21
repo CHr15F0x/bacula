@@ -24,7 +24,7 @@
 #include "bacula.h"
 #include "filed.h"
 #include "ch.h"
-#if AS_BACKUP
+#ifdef AS_BACKUP
 #include "as_bsock_proxy.h"
 #endif /* AS_BACKUP */
 
@@ -51,20 +51,20 @@ const bool have_xattr = false;
 int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level);
 
 static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest, DIGEST *signature_digest
-#if AS_BACKUP
-   , AS_BSOCK_PROXY *sd, int jcr_jobfiles
+#ifdef AS_BACKUP
+   , AS_BSOCK_PROXY *sd, int jcr_jobfiles, AS_ENGINE *ase
 #endif /* AS_BACKUP */
 );
 
 bool encode_and_send_attributes(JCR *jcr, FF_PKT *ff_pkt, int &data_stream);
-#if AS_BACKUP
+#ifdef AS_BACKUP
 static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &data_stream, AS_BSOCK_PROXY *sd, int *);
 #endif /* AS_BACKUP */
 
 static bool crypto_session_start(JCR *jcr);
 static void crypto_session_end(JCR *jcr);
 
-#if AS_BACKUP
+#ifdef AS_BACKUP
 static bool crypto_session_send(JCR *jcr, AS_BSOCK_PROXY *sd);
 #else /* AS_BACKUP */
 static bool crypto_session_send(JCR *jcr, BSOCK *sd);
@@ -122,7 +122,7 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
 
    jcr->buf_size = sd->msglen;
 
-#if AS_BACKUP
+#ifdef AS_BACKUP
    uint32_t as_bsock_proxy_initial_buf_len = AS_BUFFER_CAPACITY; /* or sd->msglen */
 #endif /* AS_BACKUP */
 
@@ -213,7 +213,7 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
       my_thread_id(), sd, sd->msg, sd->msglen);
 #endif
 
-#if AS_BACKUP
+#ifdef AS_BACKUP
    sd->set_locking();
 
    AS_ENGINE ase;
@@ -231,7 +231,7 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
       jcr->setJobStatus(JS_ErrorTerminated);
    }
 
-#if AS_BACKUP
+#ifdef AS_BACKUP
    /* Releases ownership of sd socket */
    ase.as_shutdown(sd);
    ase.cleanup();
@@ -356,7 +356,9 @@ static bool crypto_session_start(JCR *jcr)
       jcr->crypto.pki_session_encoded_size = size;
 
       /** Allocate the encryption/decryption buffer */
+#ifndef AS_BACKUP
       jcr->crypto.crypto_buf = get_memory(CRYPTO_CIPHER_MAX_BLOCK_SIZE);
+#endif /* AS_BACKUP */
    }
    return true;
 }
@@ -376,20 +378,28 @@ static void crypto_session_end(JCR *jcr)
    }
 }
 
-#if AS_BACKUP
-static bool crypto_session_send(JCR *jcr, AS_BSOCK_PROXY *sd)
-#else /* AS_BACKUP */
+#ifdef AS_BACKUP
+static bool crypto_session_send(JCR *jcr, AS_BSOCK_PROXY *sd, int jcr_jobfiles, FF_PKT *ff_pkt)
+#else /* !AS_BACKUP */
 static bool crypto_session_send(JCR *jcr, BSOCK *sd)
 #endif /* !AS_BACKUP */
 {
    POOLMEM *msgsave;
 
    /** Send our header */
-   JCR_P
+#ifdef AS_BACKUP
+   Dmsg2(100, "Send hdr fi=%ld stream=%d\n", jcr_jobfiles, STREAM_ENCRYPTED_SESSION_DATA);
+   sd->fsend("%ld %d %lld", jcr_jobfiles, STREAM_ENCRYPTED_SESSION_DATA,
+      (int64_t)ff_pkt->statp.st_size);
+#else /* !AS_BACKUP */
    Dmsg2(100, "Send hdr fi=%ld stream=%d\n", jcr->JobFiles, STREAM_ENCRYPTED_SESSION_DATA);
    sd->fsend("%ld %d %lld", jcr->JobFiles, STREAM_ENCRYPTED_SESSION_DATA,
       (int64_t)jcr->ff->statp.st_size);
+#endif /* !AS_BACKUP */
+
    msgsave = sd->msg;
+
+   JCR_P
    sd->msg = jcr->crypto.pki_session_encoded;
    sd->msglen = jcr->crypto.pki_session_encoded_size;
    jcr->JobBytes += sd->msglen;
@@ -661,11 +671,11 @@ int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level)
    }
 
    return
-#if AS_BACKUP
+#ifdef AS_BACKUP
    jcr->ase->as_save_file_schedule
-#else
+#else /* !AS_BACKUP */
    as_save_file
-#endif
+#endif /* !AS_BACKUP */
     (jcr, ff_pkt, do_plugin_set, digest, signing_digest,
       digest_stream, has_file_data);
 
@@ -712,11 +722,11 @@ int as_save_file(
    dump_consumer_queue_locked();
 #endif
 
-#if AS_BACKUP
+#ifdef AS_BACKUP
    AS_BSOCK_PROXY proxy;
    proxy.init(jcr->ase);
    AS_BSOCK_PROXY *sd = &proxy;
-#else /* AS_BACKUP */
+#else /* !AS_BACKUP */
    BSOCK *sd = jcr->store_bsock;
 #endif /* !AS_BACKUP */
 
@@ -730,9 +740,9 @@ int as_save_file(
    }
 
    /** Send attributes -- must be done after binit() */
-#if AS_BACKUP
+#ifdef AS_BACKUP
    if (!encode_and_send_attributes_via_proxy(jcr, ff_pkt, data_stream, sd, &jcr_jobfiles)) {
-#else /* AS_BACKUP */
+#else /* !AS_BACKUP */
    if (!encode_and_send_attributes(jcr, ff_pkt, data_stream)) {
 #endif /* !AS_BACKUP */
       goto bail_out;
@@ -748,7 +758,11 @@ int as_save_file(
 
    /** Set up the encryption context and send the session data to the SD */
    if (has_file_data && jcr->crypto.pki_encrypt) {
-      if (!crypto_session_send(jcr, sd)) {
+      if (!crypto_session_send(jcr, sd
+#ifdef AS_BACKUP
+            , jcr_jobfiles, ff_pkt
+#endif /* AS_BACKUP */
+         )) {
          goto bail_out;
       }
    }
@@ -810,8 +824,8 @@ int as_save_file(
       }
 
       stat = send_data(jcr, data_stream, ff_pkt, digest, signing_digest
-#if AS_BACKUP
-         , sd, jcr_jobfiles
+#ifdef AS_BACKUP
+         , sd, jcr_jobfiles, jcr->ase
 #endif /* AS_BACKUP */
       );
 
@@ -856,8 +870,8 @@ int as_save_file(
                rsrc_stream = STREAM_MACOS_FORK_DATA;
             }
             stat = send_data(jcr, rsrc_stream, ff_pkt, digest, signing_digest
-#if AS_BACKUP
-               , sd, jcr_jobfiles
+#ifdef AS_BACKUP
+               , sd, jcr_jobfiles, jcr->ase
 #endif
             );
             ff_pkt->flags = flags;
@@ -1071,7 +1085,7 @@ bail_out:
    dump_consumer_queue_locked();
 #endif
 
-#if AS_BACKUP
+#ifdef AS_BACKUP
    proxy.cleanup();
    as_free_ff_pkt_clone(ff_pkt);
 #endif
@@ -1092,8 +1106,8 @@ bail_out:
  */
 static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
                      DIGEST *signing_digest
-#if AS_BACKUP
-   , AS_BSOCK_PROXY *sd, int jcr_jobfiles
+#ifdef AS_BACKUP
+   , AS_BSOCK_PROXY *sd, int jcr_jobfiles, AS_ENGINE *ase
 #endif
 )
 {
@@ -1110,6 +1124,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
    uint32_t cipher_input_len;
    uint32_t cipher_block_size;
    uint32_t encrypted_len;
+   POOLMEM *crypto_buf = NULL;
 #ifdef FD_NO_SEND_TEST
    return 1;
 #endif
@@ -1125,7 +1140,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
    uLong compress_len = 0;
    uLong max_compress_len = 0;
    const Bytef *cbuf = NULL;
-#if AS_BACKUP
+#ifdef AS_BACKUP
    int idx = ase->get_comp_idx();
    ASSERT(idx >= 0);
    ASSERT(idx < AS_PRODUCER_THREADS);
@@ -1213,6 +1228,9 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
          goto err;
       }
 
+      int32_t size = (MAX(rsize + (int)sizeof(uint32_t), (int32_t)max_compress_len) +
+         cipher_block_size - 1) / cipher_block_size * cipher_block_size;
+
       /**
        * Grow the crypto buffer, if necessary.
        * crypto_cipher_update() will buffer up to (cipher_block_size - 1).
@@ -1220,11 +1238,15 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
        * could be returned for the given read buffer size.
        * (Using the larger of either rsize or max_compress_len)
        */
-      jcr->crypto.crypto_buf = check_pool_memory_size(jcr->crypto.crypto_buf,
-           (MAX(rsize + (int)sizeof(uint32_t), (int32_t)max_compress_len) +
-            cipher_block_size - 1) / cipher_block_size * cipher_block_size);
-
+#ifdef AS_BACKUP
+      ase->update_crypto_bufs(size);
+      wbuf = ase->crypto_buf[idx]; /* Encrypted, possibly compressed output here. */
+      crypto_buf = ase->crypto_buf[idx];
+#else /* !AS_BACKUP */
+      jcr->crypto.crypto_buf = check_pool_memory_size(jcr->crypto.crypto_buf, size);
       wbuf = jcr->crypto.crypto_buf; /* Encrypted, possibly compressed output here. */
+      crypto_buf = jcr->crypto.crypto_buf;
+#endif /* !AS_BACKUP */
    }
 
    /**
@@ -1406,7 +1428,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
          Dmsg1(20, "Encrypt len=%d\n", cipher_input_len);
 
          if (!crypto_cipher_update(cipher_ctx, packet_len, sizeof(packet_len),
-             (uint8_t *)jcr->crypto.crypto_buf, &initial_len)) {
+             (uint8_t *)crypto_buf, &initial_len)) {
             /** Encryption failed. Shouldn't happen. */
             Jmsg(jcr, M_FATAL, 0, _("Encryption error\n"));
             goto err;
@@ -1414,7 +1436,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
 
          /** Encrypt the input block */
          if (crypto_cipher_update(cipher_ctx, cipher_input, cipher_input_len,
-             (uint8_t *)&jcr->crypto.crypto_buf[initial_len], &encrypted_len)) {
+             (uint8_t *)&crypto_buf[initial_len], &encrypted_len)) {
             if ((initial_len + encrypted_len) == 0) {
                /** No full block of data available, read more data */
                continue;
@@ -1464,7 +1486,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
        * For encryption, we must call finalize to push out any
        *  buffered data.
        */
-      if (!crypto_cipher_finalize(cipher_ctx, (uint8_t *)jcr->crypto.crypto_buf,
+      if (!crypto_cipher_finalize(cipher_ctx, (uint8_t *)crypto_buf,
            &encrypted_len)) {
          /* Padding failed. Shouldn't happen. */
          Jmsg(jcr, M_FATAL, 0, _("Encryption padding error\n"));
@@ -1474,7 +1496,7 @@ static int send_data(JCR *jcr, int stream, FF_PKT *ff_pkt, DIGEST *digest,
       /** Note, on SSL pre-0.9.7, there is always some output */
       if (encrypted_len > 0) {
          sd->msglen = encrypted_len;      /* set encrypted length */
-         sd->msg = jcr->crypto.crypto_buf;       /* set correct write buffer */
+         sd->msg = crypto_buf;       /* set correct write buffer */
          if (!sd->send()) {
             JCR_SCOPED_LOCK
             if (!jcr->is_job_canceled()) {
@@ -1686,7 +1708,7 @@ bool encode_and_send_attributes(JCR *jcr, FF_PKT *ff_pkt, int &data_stream)
    return stat;
 }
 
-#if AS_BACKUP
+#ifdef AS_BACKUP
 static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &data_stream, AS_BSOCK_PROXY *sd, int *jcr_jobfiles)
 {
    char attribs[MAXSTRING];
