@@ -12,7 +12,7 @@ void AS_BSOCK_PROXY::init(AS_ENGINE *as_engine)
    ase = as_engine;
 
    msg = get_pool_memory(PM_AS_BSOCK_PROXY);
-   msg = realloc_pool_memory(msg, (int32_t)ase->as_get_initial_bsock_proxy_buf_size());
+   msg = realloc_pool_memory(msg, (int32_t)ase->get_initial_bsock_proxy_buf_size());
 
 #if ASDEBUG
    Pmsg2(50, "\t\t>>>> %4d %4X AS_BSOCK_PROXY::init()\n", my_thread_id(), HH(this));
@@ -39,7 +39,7 @@ bool AS_BSOCK_PROXY::send()
 
    if (as_buf == NULL) {
       /* New file to be sent */
-      as_buf = ase->as_acquire_buffer(NULL, file_idx);
+      as_buf = ase->acquire_buf(NULL, file_idx);
       as_buf->file_idx = file_idx;
 
 #if ASDEBUG
@@ -63,7 +63,7 @@ bool AS_BSOCK_PROXY::send()
 
       /* Make sure the current buffer is marked for big file */
       as_buf->parent = this;
-      ase->as_consumer_enqueue_buffer(as_buf, false);
+      ase->consumer_enqueue_buf(as_buf, false);
 
 #if ASDEBUG
       Pmsg7(50, "\t\t>>>> %4d %4X AS_BSOCK_PROXY::send() WONT FIT GET NEW buf: %d bufsize: %4d parent: %4X msglen: %4d msg: %4d\n",
@@ -77,7 +77,7 @@ bool AS_BSOCK_PROXY::send()
 #endif
 
       /* Get a new one which is already marked */
-      as_buf = ase->as_acquire_buffer(this, file_idx);
+      as_buf = ase->acquire_buf(this, file_idx);
       as_buf->file_idx = file_idx;
 
       ASSERT(as_buf != NULL);
@@ -137,9 +137,9 @@ bool AS_BSOCK_PROXY::send()
 
       ASSERT(as_buf->size <= AS_BUFFER_CAPACITY);
 
-      ase->as_consumer_enqueue_buffer(as_buf, false);
+      ase->consumer_enqueue_buf(as_buf, false);
       /* Get a new one which is already marked */
-      as_buf = ase->as_acquire_buffer(this, file_idx);
+      as_buf = ase->acquire_buf(this, file_idx);
       as_buf->file_idx = file_idx;
 
 #if ASDEBUG
@@ -233,7 +233,7 @@ void AS_BSOCK_PROXY::finalize()
 #if ASDEBUG
       Pmsg3(50, "\t\t>>>> %4d %4X AS_BSOCK_PROXY::finalize() as_buf: %4d\n", my_thread_id(), HH(this), as_buf->id);
 #endif
-      ase->as_consumer_enqueue_buffer(as_buf, true);
+      ase->consumer_enqueue_buf(as_buf, true);
       as_buf = NULL;
    } else {
 #if ASDEBUG

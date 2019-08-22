@@ -207,7 +207,7 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
    }
 
 #if ASDEBUG
-   Pmsg4(50, "\t\t\t>>>> %4d BEFORE as_init() sock: %p msg: %p msglen: %d\n",
+   Pmsg4(50, "\t\t\t>>>> %4d BEFORE start() sock: %p msg: %p msglen: %d\n",
       my_thread_id(), sd, sd->msg, sd->msglen);
 #endif
 
@@ -220,7 +220,7 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
    jcr->ase = &ase;
 
    /* Takes ownership of sd socket */
-   ase.as_init(sd, as_bsock_proxy_initial_buf_len);
+   ase.start(sd, as_bsock_proxy_initial_buf_len);
 #endif /* AS_BACKUP */
 
    /** Subroutine save_file() is called for each file */
@@ -231,7 +231,7 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
 
 #if AS_BACKUP
    /* Releases ownership of sd socket */
-   ase.as_shutdown(sd);
+   ase.stop(sd);
    ase.cleanup();
 
    jcr->ase = NULL;
@@ -240,7 +240,7 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
 #endif /* AS_BACKUP */
 
 #if ASDEBUG
-   Pmsg4(50, "\t\t\t>>>> %4d AFTER as_shutdown() sock: %p msg: %p msglen: %d\n",
+   Pmsg4(50, "\t\t\t>>>> %4d AFTER stop() sock: %p msg: %p msglen: %d\n",
       my_thread_id(), sd, sd->msg, sd->msglen);
 #endif
 
@@ -660,7 +660,7 @@ int save_file(JCR *jcr, FF_PKT *ff_pkt, bool top_level)
 
    return
 #if AS_BACKUP
-   jcr->ase->as_save_file_schedule
+   jcr->ase->save_file_schedule
 #else
    as_save_file
 #endif

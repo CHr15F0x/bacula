@@ -66,26 +66,26 @@ class AS_ENGINE
 private:
 
    /* Producer stuff - used by worker threads that read files to be backed up */
-   POOLMEM *as_save_msg_pointer;
-   uint32_t as_initial_buf_size;
-   workq_t as_work_queue;
-   pthread_mutex_t as_buffer_lock;
-   pthread_cond_t as_buffer_cond;
-   BQUEUE as_free_buffer_queue;
+   POOLMEM *save_msg_pointer;
+   uint32_t initial_buf_size;
+   workq_t work_q;
+   pthread_mutex_t free_buf_q_lock;
+   pthread_cond_t free_buf_q_cond;
+   BQUEUE free_buf_q;
    /* Consumer stuff - related to the consumer (storage socket) thread */
-   bool as_consumer_thread_started;
-   pthread_mutex_t as_consumer_thread_lock;
-   pthread_cond_t as_consumer_thread_started_cond;
-   pthread_t as_consumer_thread;
-   bool as_consumer_thread_quit;
-   pthread_mutex_t as_consumer_queue_lock;
-   pthread_cond_t as_consumer_queue_cond;
+   bool cons_thr_started;
+   pthread_mutex_t cons_thr_lock;
+   pthread_cond_t cons_thr_started_cond;
+   pthread_t cons_thr;
+   bool cons_thr_quit;
+   pthread_mutex_t cons_q_lock;
+   pthread_cond_t cons_q_cond;
    /* Consumer stuff used by producer threads too */
-   BQUEUE as_consumer_buffer_queue;
-   as_buffer_t *as_bigfile_buffer_only;
-   AS_BSOCK_PROXY *as_bigfile_bsock_proxy;
-   as_buffer_t *as_fix_fi_order_buffer;
-   int as_last_file_idx;
+   BQUEUE cons_q;
+   as_buffer_t *bigfile_buf;
+   AS_BSOCK_PROXY *bigfile_bsock_proxy;
+   as_buffer_t *fix_fi_order_buf;
+   int last_file_idx;
 
 public:
 
@@ -93,15 +93,15 @@ public:
    void cleanup();
    void destroy();
 
-   int as_smallest_fi_in_consumer_queue();
+   int smallest_fi_in_consumer_queue();
 
-   as_buffer_t *as_acquire_buffer(AS_BSOCK_PROXY *parent, int file_idx);
+   as_buffer_t *acquire_buf(AS_BSOCK_PROXY *parent, int file_idx);
    void dump_consumer_queue(); // TODO REMOVE
    void dump_consumer_queue_locked(); // TODO REMOVE
 
-   void as_consumer_enqueue_buffer(as_buffer_t *buffer, bool finalize);
+   void consumer_enqueue_buf(as_buffer_t *buffer, bool finalize);
 
-   int as_save_file_schedule(
+   int save_file_schedule(
       JCR *jcr,
       FF_PKT *ff_pkt,
       bool do_plugin_set,
@@ -110,35 +110,35 @@ public:
       int digest_stream,
       bool has_file_data);
 
-   void as_wait_for_consumer_thread_started();
+   void wait_consumer_thread_started();
 
-   bool as_quit_consumer_thread_loop();
+   bool quit_consumer_thread_loop();
 
-   bool as_is_consumer_queue_empty(bool lockme);
+   bool consumer_queue_empty(bool lockme);
 
-   void as_release_buffer(as_buffer_t *buffer);
+   void release_buffer(as_buffer_t *buffer);
 
-   void as_consumer_thread_loop(BSOCK *sd);
+   void consumer_thread_loop(BSOCK *sd);
 
-   void as_init_free_buffers_queue();
+   void init_free_buffers_queue();
 
-   void as_init_consumer_thread(BSOCK *sd);
+   void init_consumer_thread(BSOCK *sd);
 
-   void as_workqueue_init();
+   void work_queue_init();
 
-   void as_init(BSOCK *sd, uint32_t buf_size);
+   void start(BSOCK *sd, uint32_t buf_size);
 
-   uint32_t as_get_initial_bsock_proxy_buf_size();
+   uint32_t get_initial_bsock_proxy_buf_size();
 
-   void as_request_consumer_thread_quit();
+   void request_consumer_thread_quit();
 
-   void as_join_consumer_thread();
+   void join_consumer_thread();
 
-   void as_dealloc_all_buffers();
+   void dealloc_all_buffers();
 
-   void as_workqueue_destroy();
+   void work_queue_destroy();
 
-   void as_shutdown(BSOCK *sd);
+   void stop(BSOCK *sd);
 };
 
 /**
