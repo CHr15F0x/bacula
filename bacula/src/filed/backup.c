@@ -1680,7 +1680,7 @@ static bool encode_and_send_attributes_via_proxy(JCR *jcr, FF_PKT *ff_pkt, int &
 #endif
    int jcr_jobfiles_snapshot = 0;
 
-   Dmsg1(300, "encode_and_send_attrs fname=%s\n", ff_pkt->fname);
+   Dmsg1(300, "encode_and_send_attrs_via_proxy fname=%s\n", ff_pkt->fname);
    /** Find what data stream we will use, then encode the attributes */
    if ((data_stream = select_data_stream(ff_pkt)) == STREAM_NONE) {
       /* This should not happen */
