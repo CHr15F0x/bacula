@@ -21,6 +21,8 @@
 #ifndef _BACULA_H
 #define _BACULA_H 1
 
+#define AS_BACKUP 1
+
 /* Disable FORTIFY_SOURCE, because bacula uses is own memory
  * manager
  */
