@@ -705,6 +705,11 @@ int as_save_file(
    int rtnstat = 0;
    int jcr_jobfiles = 0;
 
+   char buf[16] = "ba-PRO-";
+   static int len = strlen(buf);
+   sprintf(buf + len, "%08X", pthread_self());
+   pthread_setname_np(pthread_self(), buf);
+
 #if ASDEBUG_AS_SAVE_FILE
    Pmsg2(50, "\t\t\t>>>> %4d as_save_file() BEGIN file: %s\n", my_thread_id(), ff_pkt->fname);
    dump_consumer_queue_locked();

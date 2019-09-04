@@ -730,6 +730,9 @@ void AS_ENGINE::init_free_buffers_queue()
 
 void AS_ENGINE::init_consumer_thread(BSOCK *sd)
 {
+   char buf[16] = "ba-CON-";
+   static int len = strlen(buf);
+
    P(cons_thr_lock);
    cons_thr_quit = false;
    V(cons_thr_lock);
@@ -739,6 +742,8 @@ void AS_ENGINE::init_consumer_thread(BSOCK *sd)
    ctxt->sd = sd;
 
    pthread_create(&cons_thr, NULL, as_consumer_thread_loop_wrapper, (void *)ctxt);
+   sprintf(buf + len, "%08X", pthread_self());
+   pthread_setname_np(pthread_self(), buf);
 
 #if ASDEBUG
    Pmsg3(50, "\t\t>>>> %4d init_consumer_thread() id: %4d sock: %p\n",
