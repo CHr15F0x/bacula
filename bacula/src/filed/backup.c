@@ -233,7 +233,11 @@ bool blast_data_to_storage_daemon(JCR *jcr, char *addr)
    /* Releases ownership of sd socket */
    ase.stop(sd);
    ase.cleanup();
-
+   /*
+    * This is very important - AS_BSOCK_PROXY and as_new_ff_pkt_clone do many
+    * pool allocations and cause the pools to grow to immense sizes
+    */
+   garbage_collect_memory();
    jcr->ase = NULL;
 
    sd->clear_locking();

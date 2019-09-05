@@ -252,7 +252,6 @@ FF_PKT *as_new_ff_pkt_clone(FF_PKT *orig_ff_pkt)
    STRDUP(object_name);
    STRDUP(object);
    STRDUP(plugin);
-   POOLMEMDUP(sys_fname);
    POOLMEMDUP(fname_save);
    POOLMEMDUP(link_save);
    POOLMEMDUP(ignoredir_fname);
@@ -277,7 +276,6 @@ void as_free_ff_pkt_clone(FF_PKT *ff_pkt)
    STRFREE(object_name);
    STRFREE(object);
    STRFREE(plugin);
-   POOLMEMFREE(sys_fname);
    POOLMEMFREE(fname_save);
    POOLMEMFREE(link_save);
    POOLMEMFREE(ignoredir_fname);
@@ -304,7 +302,7 @@ int AS_ENGINE::save_file_schedule(
    Pmsg2(50, "\t\t>>>> %4d save_file_schedule() file: %s\n", my_thread_id(), ff_pkt->fname);
 #endif
 
-   as_save_file_context_t *context = (as_save_file_context_t *)malloc(sizeof(as_save_file_context_t));
+   as_save_file_context_t *context = (as_save_file_context_t *)bmalloc(sizeof(as_save_file_context_t));
    context->jcr = jcr;
    context->ff_pkt = as_new_ff_pkt_clone(ff_pkt);
    context->do_plugin_set = do_plugin_set;
@@ -707,7 +705,7 @@ void AS_ENGINE::init_free_buffers_queue()
 #endif
 
    for (int i = 0; i < AS_BUFFERS; ++i) {
-      buffer = (as_buffer_t *)malloc(sizeof(as_buffer_t));
+      buffer = (as_buffer_t *)bmalloc(sizeof(as_buffer_t));
       buffer->id = AS_BUFFER_BASE + i;
       buffer->size = 0;
       buffer->parent = NULL;
@@ -717,12 +715,12 @@ void AS_ENGINE::init_free_buffers_queue()
 
    ASSERT(AS_BUFFERS == qsize(&free_buf_q));
 
-   bigfile_buf = (as_buffer_t *)malloc(sizeof(as_buffer_t));
+   bigfile_buf = (as_buffer_t *)bmalloc(sizeof(as_buffer_t));
    bigfile_buf->id = AS_BUFFER_BASE + 998;
 
    ASSERT(bigfile_buf != NULL);
 
-   fix_fi_order_buf = (as_buffer_t *)malloc(sizeof(as_buffer_t));
+   fix_fi_order_buf = (as_buffer_t *)bmalloc(sizeof(as_buffer_t));
    fix_fi_order_buf->id = AS_BUFFER_BASE + 999;
 
    ASSERT(fix_fi_order_buf != NULL);
@@ -737,7 +735,7 @@ void AS_ENGINE::init_consumer_thread(BSOCK *sd)
    cons_thr_quit = false;
    V(cons_thr_lock);
 
-   as_cons_thread_loop_context_t *ctxt = (as_cons_thread_loop_context_t *)malloc(sizeof(as_cons_thread_loop_context_t));
+   as_cons_thread_loop_context_t *ctxt = (as_cons_thread_loop_context_t *)bmalloc(sizeof(as_cons_thread_loop_context_t));
    ctxt->as_engine = this;
    ctxt->sd = sd;
 

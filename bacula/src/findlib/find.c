@@ -51,8 +51,6 @@ FF_PKT *init_find_files()
   ff = (FF_PKT *)bmalloc(sizeof(FF_PKT));
   memset(ff, 0, sizeof(FF_PKT));
 
-  ff->sys_fname = get_pool_memory(PM_FNAME);
-
    /* Get system path and filename maximum lengths */
    path_max = pathconf(".", _PC_PATH_MAX);
    if (path_max < 2048) {
@@ -455,7 +453,6 @@ term_find_files(FF_PKT *ff)
 {
    int hard_links;
 
-   free_pool_memory(ff->sys_fname);
    if (ff->fname_save) {
       free_pool_memory(ff->fname_save);
    }

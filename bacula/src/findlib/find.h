@@ -154,7 +154,6 @@ struct FF_PKT {
    char *object_name;                 /* Object name */
    char *object;                      /* restore object */
    char *plugin;                      /* Current Options{Plugin=} name */
-   POOLMEM *sys_fname;                /* system filename */
    POOLMEM *fname_save;               /* save when stripping path */
    POOLMEM *link_save;                /* save when stripping path */
    POOLMEM *ignoredir_fname;          /* used to ignore directories */
